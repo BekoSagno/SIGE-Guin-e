@@ -1,0 +1,282 @@
+// Prisma Schema pour SIGE-Guinée
+// Base de données PostgreSQL
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Table Users
+model User {
+  id           String   @id @default(uuid())
+  nom          String
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  role         Role     @default(CITOYEN)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  homes              Home[]              @relation("HomeOwner")
+  incidents          Incident[]
+  loadSheddingEvents LoadSheddingEvent[] @relation("SheddingTriggeredBy")
+  homeMemberships    HomeMember[]
+  energyTransactions EnergyTransaction[]
+
+  @@map("users")
+}
+
+enum Role {
+  CITOYEN
+  AGENT_EDG
+  ADMIN_ETAT
+}
+
+enum FamilyRole {
+  ADMIN
+  MEMBER
+  CHILD
+}
+
+// Table Homes (Foyers)
+model Home {
+  id           String      @id @default(uuid())
+  proprietaireId String    @map("proprietaire_id")
+  nom          String
+  ville        String
+  type         HomeType
+  latitude     Float?
+  longitude    Float?
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
+
+  // Relations
+  proprietaire User        @relation("HomeOwner", fields: [proprietaireId], references: [id], onDelete: Cascade)
+  meters       Meter[]
+  financials   Financial?
+  incidents    Incident[]
+  members      HomeMember[]
+  devices      DeviceInventory[]
+  energyTransfersFrom EnergyTransaction[] @relation("FromHome")
+  energyTransfersTo   EnergyTransaction[] @relation("ToHome")
+
+  @@index([ville])
+  @@index([proprietaireId])
+  @@map("homes")
+}
+
+enum HomeType {
+  EDG
+  SOLAIRE
+  HYBRIDE
+}
+
+// Table Meters (Kits IoT)
+model Meter {
+  id             String       @id @default(uuid())
+  homeId         String       @map("home_id")
+  firmwareVersion String      @map("firmware_version")
+  status         MeterStatus  @default(OFFLINE)
+  lastSeen       DateTime?    @map("last_seen")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+
+  // Relations
+  home           Home         @relation(fields: [homeId], references: [id], onDelete: Cascade)
+  energyData     EnergyData[]
+  nilmSignatures NILMSignature[]
+
+  @@index([status])
+  @@index([homeId])
+  @@map("meters")
+}
+
+enum MeterStatus {
+  ONLINE
+  OFFLINE
+}
+
+// Table EnergyData (Time-Series)
+model EnergyData {
+  id           String        @id @default(uuid())
+  meterId      String        @map("meter_id")
+  timestamp    DateTime      @default(now())
+  voltage      Float?
+  current      Float?
+  power        Float?
+  energySource EnergySource  @map("energy_source")
+  createdAt    DateTime      @default(now()) @map("created_at")
+
+  // Relations
+  meter        Meter         @relation(fields: [meterId], references: [id], onDelete: Cascade)
+
+  @@index([timestamp(sort: Desc)])
+  @@index([meterId])
+  @@index([meterId, timestamp(sort: Desc)])
+  @@map("energy_data")
+}
+
+enum EnergySource {
+  GRID
+  SOLAR
+  BATTERY
+}
+
+// Table Incidents
+model Incident {
+  id           String          @id @default(uuid())
+  reporterId   String?         @map("reporter_id")
+  homeId       String?         @map("home_id")
+  description  String
+  photoUrl     String?         @map("photo_url")
+  latitude     Float?
+  longitude    Float?
+  status       IncidentStatus  @default(OPEN)
+  incidentType IncidentType?   @map("incident_type")
+  createdAt    DateTime        @default(now()) @map("created_at")
+  updatedAt    DateTime        @updatedAt @map("updated_at")
+  closedAt     DateTime?       @map("closed_at")
+
+  // Relations
+  reporter     User?           @relation(fields: [reporterId], references: [id], onDelete: SetNull)
+  home         Home?           @relation(fields: [homeId], references: [id])
+
+  @@index([status])
+  @@index([incidentType])
+  @@index([reporterId])
+  @@map("incidents")
+}
+
+enum IncidentStatus {
+  OPEN
+  DISPATCHED
+  CLOSED
+}
+
+enum IncidentType {
+  FRAUDE_SUSPECTEE
+  PANNE
+  COUPURE
+  AUTRE
+}
+
+// Table Financials
+model Financial {
+  id           String   @id @default(uuid())
+  homeId       String   @unique @map("home_id")
+  balance      Float    @default(0)
+  lastTopup    DateTime? @map("last_topup")
+  monthlyBudget Float?  @map("monthly_budget")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  home         Home     @relation(fields: [homeId], references: [id], onDelete: Cascade)
+
+  @@index([homeId])
+  @@map("financials")
+}
+
+// Table NILM Device Signatures
+model NILMSignature {
+  id             String   @id @default(uuid())
+  meterId        String   @map("meter_id")
+  deviceName     String   @map("device_name")
+  deviceType     String   @map("device_type")
+  powerSignature Float?   @map("power_signature")
+  detectedAt     DateTime @default(now()) @map("detected_at")
+  isActive       Boolean  @default(true) @map("is_active")
+
+  // Relations
+  meter          Meter    @relation(fields: [meterId], references: [id], onDelete: Cascade)
+
+  @@index([meterId])
+  @@index([meterId, isActive])
+  @@map("nilm_signatures")
+}
+
+// Table Load Shedding Events
+model LoadSheddingEvent {
+  id            String            @id @default(uuid())
+  zoneId        String            @map("zone_id")
+  triggeredBy   String?           @map("triggered_by")
+  commandType   SheddingCommand   @map("command_type")
+  metersAffected Int?             @map("meters_affected")
+  startedAt     DateTime          @default(now()) @map("started_at")
+  endedAt       DateTime?         @map("ended_at")
+
+  // Relations
+  triggeredByUser User?           @relation("SheddingTriggeredBy", fields: [triggeredBy], references: [id])
+
+  @@index([zoneId])
+  @@index([startedAt(sort: Desc)])
+  @@map("load_shedding_events")
+}
+
+enum SheddingCommand {
+  SHED_HEAVY_LOADS
+  RESTORE
+}
+
+// Table HomeMember (Gestion Familiale RBAC)
+model HomeMember {
+  id        String      @id @default(uuid())
+  homeId    String      @map("home_id")
+  userId    String      @map("user_id")
+  role      FamilyRole  @default(MEMBER)
+  createdAt DateTime    @default(now()) @map("created_at")
+  updatedAt DateTime    @updatedAt @map("updated_at")
+
+  // Relations
+  home      Home        @relation(fields: [homeId], references: [id], onDelete: Cascade)
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([homeId, userId])
+  @@index([homeId])
+  @@index([userId])
+  @@map("home_members")
+}
+
+// Table DeviceInventory (Inventaire des Appareils)
+model DeviceInventory {
+  id              String   @id @default(uuid())
+  homeId          String   @map("home_id")
+  name            String
+  type            String
+  signatureNILM   String?  @map("signature_nilm")
+  powerRating     Float?   @map("power_rating")
+  isRestricted    Boolean  @default(false) @map("is_restricted") // Pour contrôle parental
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  home            Home     @relation(fields: [homeId], references: [id], onDelete: Cascade)
+
+  @@index([homeId])
+  @@map("device_inventory")
+}
+
+// Table EnergyTransaction (Transferts d'Énergie/Crédit)
+model EnergyTransaction {
+  id          String   @id @default(uuid())
+  fromHomeId  String   @map("from_home_id")
+  toHomeId    String   @map("to_home_id")
+  amount      Float
+  unit        String   // "GNF" ou "Wh"
+  initiatedBy String   @map("initiated_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  // Relations
+  fromHome    Home     @relation("FromHome", fields: [fromHomeId], references: [id])
+  toHome      Home     @relation("ToHome", fields: [toHomeId], references: [id])
+  initiator   User     @relation(fields: [initiatedBy], references: [id])
+
+  @@index([fromHomeId])
+  @@index([toHomeId])
+  @@index([initiatedBy])
+  @@map("energy_transactions")
+}

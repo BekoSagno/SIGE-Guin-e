@@ -1,0 +1,245 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-gray-50 text-gray-900 dark:bg-gray-900 dark:text-gray-100 transition-colors;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-white dark:bg-gray-800 rounded-xl shadow-lg dark:shadow-gray-900/50 p-6 transition-all duration-300 hover:shadow-xl dark:hover:shadow-gray-900/70 border border-gray-100 dark:border-gray-700;
+  }
+  
+  .card-interactive {
+    @apply card cursor-pointer transform hover:scale-[1.02] hover:-translate-y-1;
+  }
+  
+  .btn-primary {
+    @apply bg-gradient-to-r from-primary-500 to-primary-600 dark:from-primary-600 dark:to-primary-700 
+           text-white px-6 py-3 rounded-xl font-semibold shadow-lg hover:shadow-xl 
+           transform hover:scale-105 active:scale-95 transition-all duration-200 
+           flex items-center justify-center gap-2;
+  }
+  
+  .btn-secondary {
+    @apply bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 
+           px-6 py-3 rounded-xl font-semibold shadow-md hover:shadow-lg 
+           transform hover:scale-105 active:scale-95 transition-all duration-200 
+           flex items-center justify-center gap-2;
+  }
+
+  .stat-card {
+    @apply card bg-gradient-to-br from-primary-50 to-primary-100/50 dark:from-primary-900/20 dark:to-primary-800/20 
+           border-l-4 border-primary-500 animate-slide-up;
+  }
+
+  .success-card {
+    @apply card bg-gradient-to-br from-success-50 to-success-100/50 dark:from-success-900/20 dark:to-success-800/20 
+           border-l-4 border-success-500;
+  }
+
+  .accent-card {
+    @apply card bg-gradient-to-br from-accent-50 to-accent-100/50 dark:from-accent-900/20 dark:to-accent-800/20 
+           border-l-4 border-accent-500;
+  }
+
+  .input {
+    @apply w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 
+           bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100
+           focus:ring-2 focus:ring-primary-500 focus:border-transparent
+           transition-all duration-200;
+  }
+}
+
+/* ==================== ANIMATIONS ==================== */
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slide-out-right {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+}
+
+@keyframes fade-in-scale {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes bounce-in {
+  0% {
+    transform: scale(0.3);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.05);
+  }
+  70% {
+    transform: scale(0.9);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes slide-up {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slide-down {
+  from {
+    transform: translateY(-20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right 0.3s ease-out forwards;
+}
+
+.animate-slide-out-right {
+  animation: slide-out-right 0.3s ease-in forwards;
+}
+
+.animate-fade-in-scale {
+  animation: fade-in-scale 0.2s ease-out forwards;
+}
+
+.animate-bounce-in {
+  animation: bounce-in 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55) forwards;
+}
+
+.animate-slide-up {
+  animation: slide-up 0.4s ease-out forwards;
+}
+
+.animate-slide-down {
+  animation: slide-down 0.4s ease-out forwards;
+}
+
+.animate-fade-in {
+  animation: fade-in 0.3s ease-out forwards;
+}
+
+/* ==================== RESPONSIVE UTILITIES ==================== */
+
+/* Masquer la scrollbar sur tablette pour le menu horizontal */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* Safe area pour les appareils avec notch */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .safe-area-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+/* ==================== RESPONSIVE BREAKPOINTS ==================== */
+
+/* Mobile: < 768px */
+@media (max-width: 767px) {
+  .card {
+    @apply p-4;
+  }
+  
+  .btn-primary {
+    @apply px-4 py-2.5 text-sm;
+  }
+
+  /* Espace pour le menu flottant en bas */
+  main {
+    padding-bottom: 5rem !important;
+  }
+}
+
+/* Tablette: 768px - 1023px */
+@media (min-width: 768px) and (max-width: 1023px) {
+  /* Espace pour la barre de navigation en bas */
+  main {
+    padding-bottom: 5rem !important;
+  }
+}
+
+/* Desktop: >= 1024px */
+@media (min-width: 1024px) {
+  main {
+    padding-bottom: 0 !important;
+  }
+}
+
+/* ==================== COMPOSANTS RESPONSIVES ==================== */
+
+/* Grilles responsives */
+.grid-responsive {
+  @apply grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4;
+}
+
+.grid-responsive-2 {
+  @apply grid grid-cols-1 md:grid-cols-2 gap-4;
+}
+
+.grid-responsive-3 {
+  @apply grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4;
+}
+
+/* Texte responsive */
+.text-responsive-title {
+  @apply text-xl sm:text-2xl lg:text-3xl;
+}
+
+.text-responsive-subtitle {
+  @apply text-base sm:text-lg lg:text-xl;
+}
+
+/* Conteneur responsive */
+.container-responsive {
+  @apply w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8;
+}

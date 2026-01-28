@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test API EDG - SIGE-Guinée</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        .header h1 {
+            font-size: 2rem;
+            margin-bottom: 10px;
+        }
+        .content {
+            padding: 30px;
+        }
+        .section {
+            margin-bottom: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 12px;
+            border-left: 4px solid #667eea;
+        }
+        .section h2 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 1.3rem;
+        }
+        .input-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #555;
+            font-weight: 600;
+        }
+        input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+        input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        button:hover {
+            transform: translateY(-2px);
+        }
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        .result {
+            margin-top: 15px;
+            padding: 15px;
+            background: #fff;
+            border-radius: 8px;
+            border: 2px solid #ddd;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .result.success {
+            border-color: #28a745;
+            background: #d4edda;
+        }
+        .result.error {
+            border-color: #dc3545;
+            background: #f8d7da;
+        }
+        pre {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            font-size: 12px;
+        }
+        .token-display {
+            background: #e9ecef;
+            padding: 10px;
+            border-radius: 6px;
+            font-family: monospace;
+            font-size: 12px;
+            word-break: break-all;
+            margin-top: 10px;
+        }
+        .status {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-left: 10px;
+        }
+        .status.connected {
+            background: #d4edda;
+            color: #155724;
+        }
+        .status.disconnected {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .api-list {
+            list-style: none;
+        }
+        .api-list li {
+            padding: 8px;
+            margin: 5px 0;
+            background: white;
+            border-radius: 6px;
+            font-family: monospace;
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔌 Test API EDG - SIGE-Guinée</h1>
+            <p>Interface de test pour les APIs protégées</p>
+        </div>
+        
+        <div class="content">
+            <!-- Section Authentification -->
+            <div class="section">
+                <h2>1️⃣ Authentification</h2>
+                <div class="input-group">
+                    <label>Email</label>
+                    <input type="email" id="email" value="agent@edg.gn" placeholder="agent@edg.gn">
+                </div>
+                <div class="input-group">
+                    <label>Mot de passe</label>
+                    <input type="password" id="password" value="password123" placeholder="password123">
+                </div>
+                <button onclick="login()">Se connecter</button>
+                <div id="token-display" style="display: none;">
+                    <div class="token-display" id="token-text"></div>
+                    <div style="margin-top: 10px;">
+                        <span>Statut: </span>
+                        <span class="status disconnected" id="auth-status">Non connecté</span>
+                    </div>
+                </div>
+                <div id="login-result" class="result" style="display: none;"></div>
+            </div>
+
+            <!-- Section Test APIs -->
+            <div class="section">
+                <h2>2️⃣ Tester les APIs</h2>
+                <p style="margin-bottom: 15px; color: #666;">
+                    Sélectionnez une API à tester (nécessite d'être connecté) :
+                </p>
+                
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 10px;">
+                    <button onclick="testAPI('broadcast/zones')">📢 Broadcast Zones</button>
+                    <button onclick="testAPI('broadcast/templates')">📝 Broadcast Templates</button>
+                    <button onclick="testAPI('reconciliation/zones')">⚖️ Réconciliation Zones</button>
+                    <button onclick="testAPI('transformers')">🔧 Transformateurs</button>
+                    <button onclick="testAPI('transformers/stats/summary')">📊 Stats Transformateurs</button>
+                    <button onclick="testAPI('grid/zones')">🗺️ Grid Zones</button>
+                    <button onclick="testAPI('grid/transformers')">⚡ Grid Transformateurs</button>
+                    <button onclick="testAPI('grid/mqtt-log')">📡 Journal MQTT</button>
+                </div>
+                
+                <div id="api-result" class="result" style="display: none;"></div>
+            </div>
+
+            <!-- Section Documentation -->
+            <div class="section">
+                <h2>3️⃣ Documentation</h2>
+                <p style="margin-bottom: 10px;">
+                    <strong>Routes disponibles :</strong>
+                </p>
+                <ul class="api-list">
+                    <li>GET /api/routes - Documentation complète</li>
+                    <li>GET /api/health - Vérifier le serveur</li>
+                    <li>POST /api/auth/login - Se connecter</li>
+                    <li>GET /api/broadcast/* - APIs de diffusion</li>
+                    <li>GET /api/reconciliation/* - APIs de réconciliation</li>
+                    <li>GET /api/transformers/* - APIs transformateurs</li>
+                    <li>GET /api/grid/* - APIs réseau</li>
+                </ul>
+                <button onclick="loadDocumentation()" style="margin-top: 15px;">📖 Charger la documentation</button>
+                <div id="doc-result" class="result" style="display: none;"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:5000/api';
+        let currentToken = null;
+
+        async function login() {
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            const resultDiv = document.getElementById('login-result');
+            const tokenDisplay = document.getElementById('token-display');
+            const tokenText = document.getElementById('token-text');
+            const authStatus = document.getElementById('auth-status');
+
+            resultDiv.style.display = 'block';
+            resultDiv.className = 'result';
+            resultDiv.innerHTML = '<pre>Connexion en cours...</pre>';
+
+            try {
+                const response = await fetch(`${API_BASE}/auth/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.token) {
+                    currentToken = data.token;
+                    tokenText.textContent = `Token: ${data.token.substring(0, 50)}...`;
+                    tokenDisplay.style.display = 'block';
+                    authStatus.textContent = 'Connecté';
+                    authStatus.className = 'status connected';
+                    
+                    resultDiv.className = 'result success';
+                    resultDiv.innerHTML = `<pre>✅ Connexion réussie !\n\nUtilisateur: ${data.user?.nom}\nRôle: ${data.user?.role}\n\nToken stocké et prêt à être utilisé.</pre>`;
+                } else {
+                    resultDiv.className = 'result error';
+                    resultDiv.innerHTML = `<pre>❌ Erreur: ${data.error || 'Connexion échouée'}</pre>`;
+                }
+            } catch (error) {
+                resultDiv.className = 'result error';
+                resultDiv.innerHTML = `<pre>❌ Erreur réseau: ${error.message}\n\nVérifiez que le backend est démarré sur http://localhost:5000</pre>`;
+            }
+        }
+
+        async function testAPI(endpoint) {
+            if (!currentToken) {
+                alert('⚠️ Vous devez d\'abord vous connecter !');
+                return;
+            }
+
+            const resultDiv = document.getElementById('api-result');
+            resultDiv.style.display = 'block';
+            resultDiv.className = 'result';
+            resultDiv.innerHTML = '<pre>Chargement...</pre>';
+
+            try {
+                const response = await fetch(`${API_BASE}/${endpoint}`, {
+                    headers: {
+                        'Authorization': `Bearer ${currentToken}`
+                    }
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    resultDiv.className = 'result success';
+                    resultDiv.innerHTML = `<pre>✅ Succès (${response.status})\n\n${JSON.stringify(data, null, 2)}</pre>`;
+                } else {
+                    resultDiv.className = 'result error';
+                    resultDiv.innerHTML = `<pre>❌ Erreur (${response.status})\n\n${JSON.stringify(data, null, 2)}</pre>`;
+                }
+            } catch (error) {
+                resultDiv.className = 'result error';
+                resultDiv.innerHTML = `<pre>❌ Erreur réseau: ${error.message}</pre>`;
+            }
+        }
+
+        async function loadDocumentation() {
+            const resultDiv = document.getElementById('doc-result');
+            resultDiv.style.display = 'block';
+            resultDiv.className = 'result';
+            resultDiv.innerHTML = '<pre>Chargement de la documentation...</pre>';
+
+            try {
+                const response = await fetch(`${API_BASE}/routes`);
+                const data = await response.json();
+
+                resultDiv.className = 'result success';
+                resultDiv.innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+            } catch (error) {
+                resultDiv.className = 'result error';
+                resultDiv.innerHTML = `<pre>❌ Erreur: ${error.message}</pre>`;
+            }
+        }
+
+        // Vérifier la santé du serveur au chargement
+        window.addEventListener('load', async () => {
+            try {
+                const response = await fetch(`${API_BASE}/health`);
+                const data = await response.json();
+                console.log('✅ Serveur accessible:', data);
+            } catch (error) {
+                console.error('❌ Serveur non accessible:', error);
+                alert('⚠️ Le serveur backend n\'est pas accessible sur http://localhost:5000\n\nVérifiez qu\'il est démarré avec: npm run dev');
+            }
+        });
+    </script>
+</body>
+</html>

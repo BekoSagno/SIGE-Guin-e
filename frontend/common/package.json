@@ -1,0 +1,16 @@
+{
+  "name": "@sige-guinee/common",
+  "version": "1.0.0",
+  "description": "Code commun partagé entre les frontends SIGE-Guinée",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    "./services": "./src/services/index.js",
+    "./utils": "./src/utils/index.js",
+    "./types": "./src/types/index.js",
+    "./constants": "./src/constants/index.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.2"
+  }
+}
