@@ -28,14 +28,30 @@ Smart_ENERGIE/
 - Git
 - npm ou yarn
 
-### Installation Complète
+### Installation Automatique (Recommandé)
+
+```powershell
+# Cloner le projet
+git clone https://github.com/BekoSagno/SIGE-Guin-e.git
+cd SIGE-Guin-e
+
+# Installation complète automatique
+.\setup.ps1
+```
+
+Le script `setup.ps1` fait tout automatiquement :
+- ✅ Vérifie les prérequis
+- ✅ Installe toutes les dépendances
+- ✅ Configure les fichiers `.env`
+- ✅ Démarre PostgreSQL
+- ✅ Initialise la base de données
+
+### Installation Manuelle
+
+Si vous préférez installer manuellement :
 
 ```bash
-# Cloner le projet
-git clone https://github.com/VOTRE_USERNAME/SIGE-Guinée.git
-cd SIGE-Guinée
-
-# Backend (Terminal 1)
+# Backend
 cd backend
 npm install
 cp env.example .env
@@ -98,8 +114,30 @@ Accessible sur `http://localhost:3003`
 
 ## 📚 Documentation
 
+- [Guide du Workflow](./WORKFLOW.md) - **NOUVEAU** - Tous les scripts et outils disponibles
 - [Guide de Test des APIs](./backend/TEST_API_GUIDE.md) - Documentation complète pour tester toutes les APIs
 - [README Backend](./backend/README.md) - Documentation détaillée du backend
+- [Guide de Synchronisation Git](./QUICK_SYNC.md) - Comment synchroniser avec GitHub
+
+## 🛠️ Scripts Disponibles
+
+### Installation et Configuration
+- `.\setup.ps1` - Installation complète automatique
+- `.\check-env.ps1` - Vérifier la configuration de l'environnement
+
+### Développement
+- `.\dev.ps1` - Démarrage flexible des services (recommandé)
+- `.\start-servers.ps1` - Démarrage classique de tous les services
+
+### Base de Données
+- `.\db-backup.ps1` - Sauvegarder la base de données
+- `.\db-restore.ps1` - Restaurer depuis une sauvegarde
+- `.\db-reset.ps1` - Réinitialiser complètement la base
+
+### Git
+- `.\sync-to-github.ps1` - Synchroniser automatiquement vers GitHub
+
+**📖 Voir [WORKFLOW.md](./WORKFLOW.md) pour la documentation complète de tous les scripts**
 
 ## 🧪 Comptes de Test
 

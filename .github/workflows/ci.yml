@@ -1,0 +1,150 @@
+name: CI - Tests et Build
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  # Job de vérification du code
+  lint-and-check:
+    name: Vérification du code
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/common/package-lock.json
+            frontend/citoyen/package-lock.json
+            frontend/edg/package-lock.json
+            frontend/etat/package-lock.json
+      
+      - name: Install Backend dependencies
+        working-directory: ./backend
+        run: npm ci
+      
+      - name: Install Frontend Common dependencies
+        working-directory: ./frontend/common
+        run: npm ci
+      
+      - name: Install Frontend Citoyen dependencies
+        working-directory: ./frontend/citoyen
+        run: npm ci
+      
+      - name: Install Frontend EDG dependencies
+        working-directory: ./frontend/edg
+        run: npm ci
+      
+      - name: Install Frontend État dependencies
+        working-directory: ./frontend/etat
+        run: npm ci
+      
+      - name: Generate Prisma Client
+        working-directory: ./backend
+        run: npm run db:generate
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/sige_guinee?schema=public
+      
+      - name: Build Backend
+        working-directory: ./backend
+        run: npm run build || echo "No build script"
+        continue-on-error: true
+      
+      - name: Build Frontend Citoyen
+        working-directory: ./frontend/citoyen
+        run: npm run build
+        continue-on-error: true
+      
+      - name: Build Frontend EDG
+        working-directory: ./frontend/edg
+        run: npm run build
+        continue-on-error: true
+      
+      - name: Build Frontend État
+        working-directory: ./frontend/etat
+        run: npm run build
+        continue-on-error: true
+
+  # Job de tests (quand les tests seront implémentés)
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sige_guinee
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+      
+      - name: Install Backend dependencies
+        working-directory: ./backend
+        run: npm ci
+      
+      - name: Generate Prisma Client
+        working-directory: ./backend
+        run: npm run db:generate
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/sige_guinee?schema=public
+      
+      - name: Run migrations
+        working-directory: ./backend
+        run: npm run db:migrate
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/sige_guinee?schema=public
+      
+      - name: Run tests (quand disponibles)
+        working-directory: ./backend
+        run: npm test || echo "No tests yet"
+        continue-on-error: true
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/sige_guinee?schema=public
+          JWT_SECRET: test-jwt-secret-key-for-ci-min-32-chars-long
+          NODE_ENV: test
+
+  # Job de vérification de sécurité
+  security:
+    name: Vérification de sécurité
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Run npm audit (Backend)
+        working-directory: ./backend
+        run: npm audit --audit-level=moderate || true
+        continue-on-error: true
+      
+      - name: Run npm audit (Frontend Common)
+        working-directory: ./frontend/common
+        run: npm audit --audit-level=moderate || true
+        continue-on-error: true

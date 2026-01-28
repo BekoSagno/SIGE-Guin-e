@@ -65,6 +65,14 @@ pgdata/
 backend/uploads/*
 !backend/uploads/.gitkeep
 
+# Backups de base de données
+backups/
+!backups/.gitkeep
+
+# Coverage de tests
+coverage/
+*.lcov
+
 # Build artifacts
 *.tsbuildinfo
 .cache/
