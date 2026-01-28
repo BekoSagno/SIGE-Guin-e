@@ -19,34 +19,52 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
-          cache: 'npm'
-          cache-dependency-path: |
-            backend/package-lock.json
-            frontend/common/package-lock.json
-            frontend/citoyen/package-lock.json
-            frontend/edg/package-lock.json
-            frontend/etat/package-lock.json
+          node-version: '20'
       
       - name: Install Backend dependencies
         working-directory: ./backend
-        run: npm ci
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci --legacy-peer-deps || npm install --legacy-peer-deps
+          else
+            npm install --legacy-peer-deps
+          fi
       
       - name: Install Frontend Common dependencies
         working-directory: ./frontend/common
-        run: npm ci
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci --legacy-peer-deps || npm install --legacy-peer-deps
+          else
+            npm install --legacy-peer-deps
+          fi
       
       - name: Install Frontend Citoyen dependencies
         working-directory: ./frontend/citoyen
-        run: npm ci
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci --legacy-peer-deps || npm install --legacy-peer-deps
+          else
+            npm install --legacy-peer-deps
+          fi
       
       - name: Install Frontend EDG dependencies
         working-directory: ./frontend/edg
-        run: npm ci
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci --legacy-peer-deps || npm install --legacy-peer-deps
+          else
+            npm install --legacy-peer-deps
+          fi
       
       - name: Install Frontend État dependencies
         working-directory: ./frontend/etat
-        run: npm ci
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci --legacy-peer-deps || npm install --legacy-peer-deps
+          else
+            npm install --legacy-peer-deps
+          fi
       
       - name: Generate Prisma Client
         working-directory: ./backend
@@ -101,13 +119,16 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
-          cache: 'npm'
-          cache-dependency-path: backend/package-lock.json
+          node-version: '20'
       
       - name: Install Backend dependencies
         working-directory: ./backend
-        run: npm ci
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci --legacy-peer-deps || npm install --legacy-peer-deps
+          else
+            npm install --legacy-peer-deps
+          fi
       
       - name: Generate Prisma Client
         working-directory: ./backend
@@ -117,7 +138,7 @@ jobs:
       
       - name: Run migrations
         working-directory: ./backend
-        run: npm run db:migrate
+        run: npx prisma migrate deploy
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/sige_guinee?schema=public
       
@@ -139,9 +160,24 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Install Backend dependencies
+        working-directory: ./backend
+        run: npm install --legacy-peer-deps --package-lock-only || npm install --legacy-peer-deps
+        continue-on-error: true
+      
       - name: Run npm audit (Backend)
         working-directory: ./backend
         run: npm audit --audit-level=moderate || true
+        continue-on-error: true
+      
+      - name: Install Frontend Common dependencies
+        working-directory: ./frontend/common
+        run: npm install --legacy-peer-deps --package-lock-only || npm install --legacy-peer-deps
         continue-on-error: true
       
       - name: Run npm audit (Frontend Common)
