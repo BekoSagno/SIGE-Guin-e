@@ -650,6 +650,56 @@ router.put(
 );
 
 /**
+ * GET /api/personnel/new-users
+ * Liste les nouveaux utilisateurs citoyens inscrits (pour EDG)
+ */
+router.get('/new-users', roleMiddleware('AGENT_EDG', 'ADMIN_ETAT'), async (req, res) => {
+  try {
+    const { limit = 50, days = 7 } = req.query;
+    const daysAgo = new Date();
+    daysAgo.setDate(daysAgo.getDate() - parseInt(days));
+
+    const newUsers = await querySQLObjects(
+      `SELECT u.id, u.nom, u.email, u.telephone, u.sige_id, u.role, u.status, 
+              u.created_at, u.updated_at,
+              COUNT(DISTINCT h.id) as homes_count
+       FROM users u
+       LEFT JOIN homes h ON h.proprietaire_id = u.id
+       WHERE u.role = 'CITOYEN'
+       AND u.created_at >= $1
+       GROUP BY u.id, u.nom, u.email, u.telephone, u.sige_id, u.role, u.status, u.created_at, u.updated_at
+       ORDER BY u.created_at DESC
+       LIMIT $2`,
+      [daysAgo.toISOString(), parseInt(limit)],
+      ['id', 'nom', 'email', 'telephone', 'sige_id', 'role', 'status', 'created_at', 'updated_at', 'homes_count']
+    );
+
+    const formatted = newUsers.map(user => ({
+      id: user.id,
+      nom: user.nom,
+      email: user.email,
+      telephone: user.telephone,
+      sigeId: user.sige_id,
+      role: user.role,
+      status: user.status,
+      homesCount: parseInt(user.homes_count) || 0,
+      createdAt: user.created_at,
+      updatedAt: user.updated_at,
+      isNew: new Date(user.created_at) > new Date(Date.now() - 24 * 60 * 60 * 1000), // < 24h
+    }));
+
+    res.json({
+      users: formatted,
+      total: formatted.length,
+      period: `${days} jours`,
+    });
+  } catch (error) {
+    console.error('Erreur récupération nouveaux utilisateurs:', error);
+    res.status(500).json({ error: 'Erreur lors de la récupération' });
+  }
+});
+
+/**
  * GET /api/personnel/audit-logs
  * Récupère les logs d'audit (ADMIN_SYSTEME uniquement)
  */

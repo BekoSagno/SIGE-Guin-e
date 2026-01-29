@@ -89,6 +89,8 @@ model Meter {
   home           Home         @relation(fields: [homeId], references: [id], onDelete: Cascade)
   energyData     EnergyData[]
   nilmSignatures NILMSignature[]
+  relays         MeterRelay[]
+  energyQuotas   EnergyQuota[]
 
   @@index([status])
   @@index([homeId])
@@ -183,19 +185,22 @@ model Financial {
 
 // Table NILM Device Signatures
 model NILMSignature {
-  id             String   @id @default(uuid())
-  meterId        String   @map("meter_id")
-  deviceName     String   @map("device_name")
-  deviceType     String   @map("device_type")
-  powerSignature Float?   @map("power_signature")
-  detectedAt     DateTime @default(now()) @map("detected_at")
-  isActive       Boolean  @default(true) @map("is_active")
+  id             String    @id @default(uuid())
+  meterId        String    @map("meter_id")
+  relayId        String?   @map("relay_id") // Circuit/Relais sur lequel l'appareil est branché
+  deviceName     String    @map("device_name")
+  deviceType     String    @map("device_type")
+  powerSignature Float?    @map("power_signature")
+  detectedAt     DateTime  @default(now()) @map("detected_at")
+  isActive       Boolean   @default(true) @map("is_active")
 
   // Relations
-  meter          Meter    @relation(fields: [meterId], references: [id], onDelete: Cascade)
+  meter          Meter     @relation(fields: [meterId], references: [id], onDelete: Cascade)
+  relay          MeterRelay? @relation(fields: [relayId], references: [id], onDelete: SetNull)
 
   @@index([meterId])
   @@index([meterId, isActive])
+  @@index([relayId])
   @@map("nilm_signatures")
 }
 
@@ -279,4 +284,58 @@ model EnergyTransaction {
   @@index([toHomeId])
   @@index([initiatedBy])
   @@map("energy_transactions")
+}
+
+// Table MeterRelay (Relais Internes du Boîtier IoT - Smart Panel)
+model MeterRelay {
+  id           String   @id @default(uuid())
+  meterId      String   @map("meter_id")
+  relayNumber  Int      @map("relay_number") // 1, 2, 3...
+  circuitType  CircuitType @map("circuit_type") // LIGHTS_PLUGS, POWER, ESSENTIAL
+  label        String?  // "Salon", "Chambres", "Climatiseurs", etc.
+  isActive     Boolean  @default(true) @map("is_active")
+  isEnabled    Boolean  @default(true) @map("is_enabled") // Contrôle manuel on/off
+  currentPower Float    @default(0) @map("current_power") // Puissance actuelle en W
+  maxPower     Float?   @map("max_power") // Puissance maximale autorisée en W
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  meter        Meter    @relation(fields: [meterId], references: [id], onDelete: Cascade)
+  nilmDevices  NILMSignature[]
+
+  @@unique([meterId, relayNumber])
+  @@index([meterId])
+  @@index([meterId, circuitType])
+  @@map("meter_relays")
+}
+
+enum CircuitType {
+  LIGHTS_PLUGS  // Relais 1 : Éclairage et Prises (Télé, etc.)
+  POWER         // Relais 2 : Puissance (Climatiseurs, Chauffe-eau)
+  ESSENTIAL     // Relais 3 : Essentiel (Réfrigérateur, etc.)
+}
+
+// Table EnergyQuota (Quota de Consommation basé sur Crédit)
+model EnergyQuota {
+  id           String   @id @default(uuid())
+  homeId       String   @map("home_id")
+  meterId      String   @map("meter_id")
+  quotaKwh     Float    @map("quota_kwh") // Quota disponible en kWh
+  quotaGnf     Float    @map("quota_gnf") // Équivalent en GNF
+  consumedKwh  Float    @default(0) @map("consumed_kwh") // Consommé depuis création
+  lastSync     DateTime? @map("last_sync") // Dernière synchronisation avec Kit IoT
+  expiresAt    DateTime? @map("expires_at") // Date d'expiration du quota
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  meter        Meter    @relation(fields: [meterId], references: [id], onDelete: Cascade)
+
+  @@index([homeId])
+  @@index([meterId])
+  @@index([meterId, isActive])
+  @@index([expiresAt])
+  @@map("energy_quotas")
 }

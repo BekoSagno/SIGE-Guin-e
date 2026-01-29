@@ -5,6 +5,7 @@ import { body, validationResult } from 'express-validator';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { executeSQL, querySQLObjects, generateUUID, formatDate } from '../services/sqlService.js';
+import websocketService from '../services/websocketService.js';
 
 const router = express.Router();
 const execAsync = promisify(exec);
@@ -413,6 +414,8 @@ router.post(
 
       const { nom, email, password, role = 'CITOYEN', telephone } = req.body;
 
+      console.log('📝 Tentative d\'inscription:', { nom, email, role });
+
       // Vérifier si l'email existe déjà
       const existingUsers = await querySQLObjects(
         'SELECT id FROM users WHERE email = $1',
@@ -445,6 +448,9 @@ router.post(
       }
 
       // Insérer l'utilisateur
+      const createdAt = now.toISOString();
+      const updatedAt = now.toISOString();
+      
       await executeSQL(
         `INSERT INTO users (id, nom, email, password_hash, role, status, edg_subrole, telephone, client_type, created_at, updated_at) 
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
@@ -458,8 +464,8 @@ router.post(
           edgSubrole,
           telephone || null,
           clientType,
-          formatDate(now), 
-          formatDate(now)
+          createdAt, 
+          updatedAt
         ]
       );
 
@@ -536,6 +542,56 @@ router.post(
         await sendSigeIdEmail(email, nom, newUser.sige_id);
       }
 
+      // Créer une notification pour l'EDG lors de l'inscription d'un citoyen
+      try {
+        const notificationId = generateUUID();
+        await executeSQL(
+          `INSERT INTO state_notifications 
+           (id, recipient_role, recipient_user_id, notification_type, title, message, data, priority, created_at)
+           VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8)`,
+          [
+            notificationId,
+            'AGENT_EDG',
+            'NEW_USER',
+            'Nouvel utilisateur inscrit',
+            `Nouveau citoyen inscrit : ${nom} (${email})${newUser.sige_id ? ` - ID SIGE: ${newUser.sige_id}` : ''}`,
+            JSON.stringify({
+              userId: newUser.id,
+              nom: newUser.nom,
+              email: newUser.email,
+              sigeId: newUser.sige_id,
+              createdAt: newUser.created_at,
+            }),
+            'NORMAL',
+            newUser.created_at,
+          ]
+        );
+
+        // Envoyer notification via WebSocket à tous les agents EDG connectés
+        websocketService.broadcast({
+          type: 'notification',
+          notification: {
+            id: notificationId,
+            type: 'NEW_USER',
+            title: 'Nouvel utilisateur inscrit',
+            message: `Nouveau citoyen : ${nom}${newUser.sige_id ? ` (${newUser.sige_id})` : ''}`,
+            data: {
+              userId: newUser.id,
+              nom: newUser.nom,
+              email: newUser.email,
+              sigeId: newUser.sige_id,
+            },
+            priority: 'NORMAL',
+          },
+          targetRole: 'AGENT_EDG',
+        });
+
+        console.log(`📢 Notification EDG créée pour nouveau citoyen: ${nom} (${newUser.sige_id || 'ID SIGE en attente'})`);
+      } catch (notifError) {
+        console.error('⚠️ Erreur création notification EDG:', notifError);
+        // Ne pas bloquer l'inscription si la notification échoue
+      }
+
       // Générer un code OTP à 6 chiffres pour vérifier l'email
       const otpCode = generateOTP();
       const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
@@ -563,8 +619,16 @@ router.post(
           : 'Votre ID SIGE sera généré et envoyé par email.',
       });
     } catch (error) {
-      console.error('Erreur inscription:', error);
-      res.status(500).json({ error: 'Erreur lors de l\'inscription' });
+      console.error('❌ Erreur inscription:', error);
+      console.error('Stack:', error.stack);
+      
+      // Envoyer une réponse même en cas d'erreur pour éviter ERR_CONNECTION_RESET
+      if (!res.headersSent) {
+        res.status(500).json({ 
+          error: 'Erreur lors de l\'inscription',
+          details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+      }
     }
   }
 );

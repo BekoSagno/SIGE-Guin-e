@@ -36,6 +36,7 @@ export const API_ENDPOINTS = {
   GRID: {
     LOAD_SHEDDING: '/grid/load-shedding',
     ZONES: '/grid/zones',
+    ZONE_RELAYS: (zoneId) => `/grid/zones/${zoneId}/relays`,
     TRANSFORMERS: '/grid/transformers',
   },
   // Incidents

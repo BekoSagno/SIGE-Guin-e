@@ -10,6 +10,7 @@ const menuItems = [
   { id: 'overview', label: 'Tableau de bord', icon: LayoutDashboard, color: 'primary' },
   { id: 'map', label: 'Carte SCADA', icon: Map, color: 'primary' },
   { id: 'clients', label: 'Gestion Clients', icon: Users, color: 'primary' },
+  { id: 'new-users', label: 'Nouveaux Utilisateurs', icon: Users, color: 'success', badge: 'new' },
   { id: 'sige-id', label: 'Recherche ID SIGE', icon: QrCode, color: 'primary' },
   { id: 'monitoring', label: 'Monitoring Réseau', icon: Activity, color: 'success' },
   { id: 'broadcast', label: 'Diffusion', icon: MessageSquare, color: 'success' },
@@ -23,7 +24,7 @@ const menuItems = [
   { id: 'maintenance', label: 'Maintenance IA', icon: Wrench, color: 'warning' },
   { id: 'billing', label: 'Facturation', icon: FileText, color: 'primary' },
   { id: 'analytics', label: 'Analytique', icon: BarChart3, color: 'success' },
-  { id: 'notifications', label: 'Alertes', icon: Bell, color: 'warning' },
+  { id: 'notifications', label: 'Notifications', icon: Bell, color: 'warning' },
   { id: 'settings', label: 'Paramètres', icon: Settings, color: 'primary' },
 ];
 

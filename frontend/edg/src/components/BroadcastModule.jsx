@@ -6,6 +6,7 @@ import {
   CheckCircle, XCircle, Loader
 } from 'lucide-react';
 import { useNotification, ConfirmDialog } from './Notification';
+import { broadcastService } from '@common/services';
 
 // Types de messages prédéfinis
 const MESSAGE_TEMPLATES = [
@@ -176,18 +177,109 @@ function BroadcastModule() {
   const [scheduledDate, setScheduledDate] = useState('');
   const [scheduledTime, setScheduledTime] = useState('');
   const [sending, setSending] = useState(false);
-  const [sentMessages, setSentMessages] = useState(MOCK_SENT_MESSAGES);
+  const [sentMessages, setSentMessages] = useState([]);
   const [confirmDialog, setConfirmDialog] = useState({ isOpen: false });
   const [previewMode, setPreviewMode] = useState(false);
+  
+  // États pour les données API
+  const [zones, setZones] = useState([]);
+  const [clients, setClients] = useState([]);
+  const [templates, setTemplates] = useState(MESSAGE_TEMPLATES);
+  const [loadingZones, setLoadingZones] = useState(false);
+  const [loadingClients, setLoadingClients] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [loadingTemplates, setLoadingTemplates] = useState(false);
 
-  // Clients individuels simulés
-  const mockIndividuals = [
-    { id: 'CLI-001', name: 'Mamadou Diallo', phone: '+224 621 00 00 01', zone: 'Dixinn', meter: 'MTR-001' },
-    { id: 'CLI-002', name: 'Fatoumata Bah', phone: '+224 621 00 00 02', zone: 'Ratoma', meter: 'MTR-002' },
-    { id: 'CLI-003', name: 'Ibrahima Sow', phone: '+224 621 00 00 03', zone: 'Matoto', meter: 'MTR-003' },
-    { id: 'CLI-004', name: 'Aissatou Barry', phone: '+224 621 00 00 04', zone: 'Kaloum', meter: 'MTR-004' },
-    { id: 'CLI-005', name: 'Oumar Camara', phone: '+224 621 00 00 05', zone: 'Dixinn', meter: 'MTR-005' },
-  ];
+  // Charger les zones au montage
+  useEffect(() => {
+    loadZones();
+    loadHistory();
+    loadTemplates();
+  }, []);
+
+  // Charger les clients quand on passe en mode individuel ou change la recherche
+  useEffect(() => {
+    if (targetMode === 'individual' && (individualSearch || activeTab === 'compose')) {
+      const timeoutId = setTimeout(() => {
+        loadClients();
+      }, 500); // Debounce
+      return () => clearTimeout(timeoutId);
+    }
+  }, [targetMode, individualSearch, activeTab]);
+
+  const loadZones = async () => {
+    try {
+      setLoadingZones(true);
+      const data = await broadcastService.getZones();
+      setZones(data.zones || []);
+    } catch (error) {
+      console.error('Erreur chargement zones:', error);
+      notify.error('Erreur lors du chargement des zones');
+      setZones(MOCK_ZONES); // Fallback sur données mockées
+    } finally {
+      setLoadingZones(false);
+    }
+  };
+
+  const loadClients = async () => {
+    try {
+      setLoadingClients(true);
+      const data = await broadcastService.searchClients({
+        search: individualSearch,
+        limit: 100,
+      });
+      setClients(data.clients || []);
+    } catch (error) {
+      console.error('Erreur chargement clients:', error);
+      notify.error('Erreur lors du chargement des clients');
+      setClients([]);
+    } finally {
+      setLoadingClients(false);
+    }
+  };
+
+  const loadHistory = async () => {
+    try {
+      setLoadingHistory(true);
+      const data = await broadcastService.getHistory({ limit: 50 });
+      const formatted = (data.messages || []).map(msg => ({
+        id: msg.id,
+        title: msg.title,
+        content: msg.content,
+        type: msg.type,
+        targetType: msg.targetMode === 'individual' ? 'individual' : 
+          Array.isArray(msg.targets) && msg.targets.length === 1 ? 'zone' : 'multiple',
+        targetName: Array.isArray(msg.targets) ? msg.targets.join(', ') : msg.targets || 'Tous',
+        recipients: msg.recipients || 0,
+        delivered: msg.delivered || 0,
+        read: msg.read || 0,
+        sentAt: msg.sentAt || msg.createdAt,
+        sentBy: msg.sentBy || 'Système',
+        scheduled: msg.scheduledAt || null,
+      }));
+      setSentMessages(formatted);
+    } catch (error) {
+      console.error('Erreur chargement historique:', error);
+      notify.error('Erreur lors du chargement de l\'historique');
+      setSentMessages([]);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  const loadTemplates = async () => {
+    try {
+      setLoadingTemplates(true);
+      const data = await broadcastService.getTemplates();
+      setTemplates(data.templates || MESSAGE_TEMPLATES);
+    } catch (error) {
+      console.error('Erreur chargement templates:', error);
+      // Garder les templates par défaut en cas d'erreur
+      setTemplates(MESSAGE_TEMPLATES);
+    } finally {
+      setLoadingTemplates(false);
+    }
+  };
 
   // Calculer le nombre total de destinataires
   const calculateRecipients = () => {
@@ -196,22 +288,31 @@ function BroadcastModule() {
     }
     
     let total = 0;
+    const processedIds = new Set(); // Éviter les doublons
+    
     selectedTargets.forEach(targetId => {
-      // Chercher dans les communes
-      MOCK_ZONES.forEach(ville => {
+      if (processedIds.has(targetId)) return; // Skip si déjà traité
+      processedIds.add(targetId);
+      
+      // Chercher dans les zones chargées depuis l'API
+      zones.forEach(ville => {
         if (ville.id === targetId) {
-          total += ville.subscribers;
+          total += ville.subscribers || 0;
         }
-        ville.communes.forEach(commune => {
-          if (commune.id === targetId) {
-            total += commune.subscribers;
-          }
-          commune.quartiers.forEach(quartier => {
-            if (quartier.id === targetId) {
-              total += quartier.subscribers;
+        if (ville.communes && Array.isArray(ville.communes)) {
+          ville.communes.forEach(commune => {
+            if (commune.id === targetId) {
+              total += commune.subscribers || 0;
+            }
+            if (commune.quartiers && Array.isArray(commune.quartiers)) {
+              commune.quartiers.forEach(quartier => {
+                if (quartier.id === targetId) {
+                  total += quartier.subscribers || 0;
+                }
+              });
             }
           });
-        });
+        }
       });
     });
     return total;
@@ -275,56 +376,65 @@ function BroadcastModule() {
         setConfirmDialog({ isOpen: false });
         setSending(true);
 
-        // Simuler l'envoi
-        await new Promise(resolve => setTimeout(resolve, 2500));
+        try {
+          // Préparer les cibles
+          const targets = targetMode === 'individual' 
+            ? selectedIndividuals.map(c => c.id)
+            : selectedTargets;
 
-        const newMessage = {
-          id: `MSG-${Date.now()}`,
-          title: messageTitle,
-          content: messageContent,
-          type: messageType,
-          targetType: targetMode === 'individual' ? 'individual' : 
-            selectedTargets.length === 1 ? 'zone' : 'multiple',
-          targetName: targetMode === 'individual' 
-            ? selectedIndividuals.map(c => c.name).join(', ')
-            : selectedTargets.join(', '),
-          recipients,
-          delivered: Math.floor(recipients * 0.98),
-          read: 0,
-          sentAt: new Date().toISOString(),
-          sentBy: 'Agent EDG',
-          scheduled: scheduleMode === 'scheduled' ? `${scheduledDate} ${scheduledTime}` : null,
-        };
+          // Préparer la date programmée si nécessaire
+          const scheduledAt = scheduleMode === 'scheduled' && scheduledDate && scheduledTime
+            ? `${scheduledDate}T${scheduledTime}:00`
+            : null;
 
-        setSentMessages(prev => [newMessage, ...prev]);
-        setSending(false);
+          // Envoyer via l'API
+          const response = await broadcastService.sendMessage({
+            title: messageTitle,
+            content: messageContent,
+            messageType: messageType,
+            targetMode: targetMode,
+            targets: targets,
+            scheduledAt: scheduledAt,
+          });
 
-        // Reset form
-        setMessageTitle('');
-        setMessageContent('');
-        setSelectedTargets([]);
-        setSelectedIndividuals([]);
-        setSelectedTemplate(null);
+          // Recharger l'historique
+          await loadHistory();
 
-        notify.success(
-          scheduleMode === 'scheduled' 
-            ? `Message programmé pour ${recipients.toLocaleString()} destinataires`
-            : `Message envoyé à ${recipients.toLocaleString()} destinataires`,
-          {
-            title: scheduleMode === 'scheduled' ? '📅 Programmé' : '✅ Envoyé',
-            duration: 5000,
-          }
-        );
+          // Reset form
+          setMessageTitle('');
+          setMessageContent('');
+          setSelectedTargets([]);
+          setSelectedIndividuals([]);
+          setSelectedTemplate(null);
+          setScheduledDate('');
+          setScheduledTime('');
 
-        setActiveTab('history');
+          notify.success(
+            scheduleMode === 'scheduled' 
+              ? `Message programmé pour ${response.broadcast.recipientsCount.toLocaleString()} destinataires`
+              : `Message envoyé à ${response.broadcast.recipientsCount.toLocaleString()} destinataires`,
+            {
+              title: scheduleMode === 'scheduled' ? '📅 Programmé' : '✅ Envoyé',
+              duration: 5000,
+            }
+          );
+
+          setActiveTab('history');
+        } catch (error) {
+          console.error('Erreur envoi message:', error);
+          notify.error(error.response?.data?.error || 'Erreur lors de l\'envoi du message');
+        } finally {
+          setSending(false);
+        }
       },
     });
   };
 
-  const filteredIndividuals = mockIndividuals.filter(client =>
-    client.name.toLowerCase().includes(individualSearch.toLowerCase()) ||
-    client.phone.includes(individualSearch) ||
-    client.zone.toLowerCase().includes(individualSearch.toLowerCase())
+  const filteredIndividuals = clients.filter(client =>
+    !individualSearch || 
+    client.name?.toLowerCase().includes(individualSearch.toLowerCase()) ||
+    client.email?.toLowerCase().includes(individualSearch.toLowerCase()) ||
+    client.zone?.toLowerCase().includes(individualSearch.toLowerCase())
   );
 
   return (
@@ -407,8 +517,18 @@ function BroadcastModule() {
                 <>
                   {/* Arborescence des zones */}
                   <div className="space-y-2 max-h-[400px] overflow-y-auto">
-                    {MOCK_ZONES.map((ville) => (
-                      <div key={ville.id} className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                    {loadingZones ? (
+                      <div className="flex items-center justify-center p-8">
+                        <Loader className="w-6 h-6 animate-spin text-primary-500" />
+                        <span className="ml-2 text-gray-600 dark:text-gray-400">Chargement des zones...</span>
+                      </div>
+                    ) : zones.length === 0 ? (
+                      <div className="text-center p-4 text-gray-500 dark:text-gray-400">
+                        Aucune zone disponible
+                      </div>
+                    ) : (
+                      zones.map((ville, villeIdx) => (
+                      <div key={ville.id || `ville-${villeIdx}`} className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
                         {/* Ville */}
                         <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50">
                           <button
@@ -439,8 +559,8 @@ function BroadcastModule() {
                         {/* Communes */}
                         {expandedZones[ville.id] && (
                           <div className="pl-4">
-                            {ville.communes.map((commune) => (
-                              <div key={commune.id}>
+                            {ville.communes && ville.communes.map((commune, communeIdx) => (
+                              <div key={commune.id || `commune-${ville.id}-${communeIdx}`}>
                                 <div className="flex items-center justify-between p-2 border-t border-gray-100 dark:border-gray-700">
                                   <button
                                     onClick={() => toggleZoneExpand(commune.id)}
@@ -467,28 +587,28 @@ function BroadcastModule() {
                                   </button>
                                 </div>
 
-                                {/* Quartiers */}
-                                {expandedZones[commune.id] && (
+                                {/* Quartiers - Non disponible actuellement depuis l'API */}
+                                {expandedZones[commune.id] && commune.quartiers && commune.quartiers.length > 0 && (
                                   <div className="pl-6">
-                                    {commune.quartiers.map((quartier) => (
+                                    {commune.quartiers.map((quartier, idx) => (
                                       <div
-                                        key={quartier.id}
+                                        key={quartier.id || `quartier-${commune.id}-${idx}`}
                                         className="flex items-center justify-between p-2 border-t border-gray-50 dark:border-gray-800"
                                       >
                                         <div className="flex items-center space-x-2">
                                           <Home className="w-3 h-3 text-success-500" />
                                           <span className="text-xs text-gray-600 dark:text-gray-400">{quartier.name}</span>
-                                          <span className="text-xs text-gray-400">({quartier.subscribers.toLocaleString()})</span>
+                                          <span className="text-xs text-gray-400">({quartier.subscribers?.toLocaleString() || 0})</span>
                                         </div>
                                         <button
-                                          onClick={() => toggleTarget(quartier.id)}
+                                          onClick={() => toggleTarget(quartier.id || `quartier-${commune.id}-${idx}`)}
                                           className={`w-4 h-4 rounded flex items-center justify-center ${
-                                            selectedTargets.includes(quartier.id)
+                                            selectedTargets.includes(quartier.id || `quartier-${commune.id}-${idx}`)
                                               ? 'bg-primary-500 text-white'
                                               : 'bg-gray-200 dark:bg-gray-600'
                                           }`}
                                         >
-                                          {selectedTargets.includes(quartier.id) && <Check className="w-2 h-2" />}
+                                          {selectedTargets.includes(quartier.id || `quartier-${commune.id}-${idx}`) && <Check className="w-2 h-2" />}
                                         </button>
                                       </div>
                                     ))}
@@ -499,7 +619,8 @@ function BroadcastModule() {
                           </div>
                         )}
                       </div>
-                    ))}
+                    ))
+                    )}
                   </div>
                 </>
               ) : (
@@ -518,7 +639,17 @@ function BroadcastModule() {
 
                   {/* Liste des clients */}
                   <div className="space-y-2 max-h-[350px] overflow-y-auto">
-                    {filteredIndividuals.map((client) => (
+                    {loadingClients ? (
+                      <div className="flex items-center justify-center p-8">
+                        <Loader className="w-6 h-6 animate-spin text-primary-500" />
+                        <span className="ml-2 text-gray-600 dark:text-gray-400">Recherche en cours...</span>
+                      </div>
+                    ) : filteredIndividuals.length === 0 ? (
+                      <div className="text-center p-4 text-gray-500 dark:text-gray-400">
+                        {individualSearch ? 'Aucun client trouvé' : 'Commencez à rechercher un client'}
+                      </div>
+                    ) : (
+                      filteredIndividuals.map((client) => (
                       <div
                         key={client.id}
                         onClick={() => toggleIndividual(client)}
@@ -531,14 +662,15 @@ function BroadcastModule() {
                         <div className="flex items-center justify-between">
                           <div>
                             <p className="font-medium text-gray-900 dark:text-gray-100 text-sm">{client.name}</p>
-                            <p className="text-xs text-gray-500">{client.phone} • {client.zone}</p>
+                            <p className="text-xs text-gray-500">{client.email || 'Pas d\'email'} • {client.zone}</p>
                           </div>
                           {selectedIndividuals.find(c => c.id === client.id) && (
                             <CheckCircle className="w-5 h-5 text-primary-500" />
                           )}
                         </div>
                       </div>
-                    ))}
+                    ))
+                    )}
                   </div>
                 </>
               )}
@@ -558,8 +690,13 @@ function BroadcastModule() {
             {/* Modèles rapides */}
             <div className="card">
               <h3 className="font-bold text-gray-900 dark:text-gray-100 mb-4">Modèles rapides</h3>
-              <div className="flex flex-wrap gap-2">
-                {MESSAGE_TEMPLATES.map((template) => (
+              {loadingTemplates ? (
+                <div className="flex items-center justify-center p-8">
+                  <Loader className="w-6 h-6 animate-spin text-primary-500" />
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {templates.map((template) => (
                   <button
                     key={template.id}
                     onClick={() => handleTemplateSelect(template)}
@@ -572,8 +709,9 @@ function BroadcastModule() {
                     <span>{template.icon}</span>
                     <span>{template.title}</span>
                   </button>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Formulaire de message */}
@@ -722,11 +860,19 @@ function BroadcastModule() {
       )}
 
       {activeTab === 'history' && (
-        <HistoryTab messages={sentMessages} />
+        <HistoryTab 
+          messages={sentMessages} 
+          loading={loadingHistory}
+          onRefresh={loadHistory}
+        />
       )}
 
       {activeTab === 'templates' && (
-        <TemplatesTab templates={MESSAGE_TEMPLATES} onSelect={(t) => { handleTemplateSelect(t); setActiveTab('compose'); }} />
+        <TemplatesTab 
+          templates={templates} 
+          loading={loadingTemplates}
+          onSelect={(t) => { handleTemplateSelect(t); setActiveTab('compose'); }} 
+        />
       )}
 
       {/* Modal aperçu */}
@@ -755,7 +901,7 @@ function BroadcastModule() {
 }
 
 // Composant Historique
-function HistoryTab({ messages }) {
+function HistoryTab({ messages, loading, onRefresh }) {
   const getTypeConfig = (type) => {
     switch (type) {
       case 'success': return { bg: 'bg-success-100 dark:bg-success-900/20', text: 'text-success-700 dark:text-success-300', icon: CheckCircle };
@@ -770,11 +916,36 @@ function HistoryTab({ messages }) {
       <div className="card">
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-bold text-gray-900 dark:text-gray-100">Messages envoyés</h3>
-          <span className="badge-info">{messages.length} messages</span>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={onRefresh}
+              className="btn-secondary text-sm"
+              disabled={loading}
+            >
+              {loading ? (
+                <Loader className="w-4 h-4 animate-spin" />
+              ) : (
+                <Clock className="w-4 h-4" />
+              )}
+              <span className="ml-1">Actualiser</span>
+            </button>
+            <span className="badge-info">{messages.length} messages</span>
+          </div>
         </div>
 
-        <div className="space-y-3">
-          {messages.map((msg) => {
+        {loading ? (
+          <div className="flex items-center justify-center p-12">
+            <Loader className="w-8 h-8 animate-spin text-primary-500" />
+            <span className="ml-3 text-gray-600 dark:text-gray-400">Chargement de l'historique...</span>
+          </div>
+        ) : messages.length === 0 ? (
+          <div className="text-center p-12 text-gray-500 dark:text-gray-400">
+            <MessageSquare className="w-12 h-12 mx-auto mb-4 opacity-50" />
+            <p>Aucun message envoyé pour le moment</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {messages.map((msg) => {
             const config = getTypeConfig(msg.type);
             const Icon = config.icon;
             const deliveryRate = Math.round((msg.delivered / msg.recipients) * 100);
@@ -815,17 +986,29 @@ function HistoryTab({ messages }) {
               </div>
             );
           })}
-        </div>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
 // Composant Modèles
-function TemplatesTab({ templates, onSelect }) {
+function TemplatesTab({ templates, loading, onSelect }) {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-      {templates.map((template) => (
+      {loading ? (
+        <div className="col-span-full flex items-center justify-center p-12">
+          <Loader className="w-8 h-8 animate-spin text-primary-500" />
+          <span className="ml-3 text-gray-600 dark:text-gray-400">Chargement des modèles...</span>
+        </div>
+      ) : templates.length === 0 ? (
+        <div className="col-span-full text-center p-12 text-gray-500 dark:text-gray-400">
+          <Copy className="w-12 h-12 mx-auto mb-4 opacity-50" />
+          <p>Aucun modèle disponible</p>
+        </div>
+      ) : (
+        templates.map((template) => (
         <div
           key={template.id}
           className="card hover:shadow-lg transition-all cursor-pointer"
@@ -842,7 +1025,8 @@ function TemplatesTab({ templates, onSelect }) {
             Utiliser ce modèle
           </button>
         </div>
-      ))}
+      ))
+      )}
     </div>
   );
 }

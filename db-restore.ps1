@@ -10,7 +10,7 @@ Write-Host "🔄 Restauration de la base de données SIGE-Guinée..." -Foregroun
 Write-Host ""
 
 # Vérifier Docker
-$dockerStatus = docker ps 2>&1
+$null = docker ps 2>&1
 if ($LASTEXITCODE -ne 0) {
     Write-Host "❌ Docker n'est pas démarré. Démarrez Docker Desktop d'abord." -ForegroundColor Red
     exit 1

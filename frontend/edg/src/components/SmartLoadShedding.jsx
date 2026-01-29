@@ -2,9 +2,10 @@ import { useState, useEffect } from 'react';
 import { 
   Zap, ZapOff, AlertTriangle, Activity, MapPin, Clock, CheckCircle,
   Send, Wifi, WifiOff, ThermometerSun, Users, RefreshCw, ChevronRight,
-  Radio, Server, ArrowRight
+  Radio, Server, ArrowRight, X
 } from 'lucide-react';
 import { useNotification, ConfirmDialog } from './Notification';
+import { gridService } from '@common/services';
 
 // Données simulées des zones et leurs boîtiers
 const MOCK_ZONES = [
@@ -78,6 +79,13 @@ const MOCK_MQTT_LOG = [
   { id: 3, timestamp: new Date(Date.now() - 900000).toISOString(), zone: 'Matoto', command: 'CMD_REDUCE_LOAD', status: 'PARTIAL', metersAffected: 85 },
 ];
 
+// Types de relais disponibles
+const RELAY_TYPES = [
+  { id: 'POWER', label: 'Puissance (Climatiseurs, Chauffe-eau)', icon: Zap, color: 'red', description: 'Coupe les appareils de forte puissance' },
+  { id: 'LIGHTS_PLUGS', label: 'Éclairage et Prises', icon: Activity, color: 'yellow', description: 'Coupe l\'éclairage et les prises' },
+  { id: 'ESSENTIAL', label: 'Essentiel (Réfrigérateur)', icon: CheckCircle, color: 'green', description: 'Ne JAMAIS couper (services vitaux)' },
+];
+
 function SmartLoadShedding() {
   const notify = useNotification();
   const [zones, setZones] = useState(MOCK_ZONES);
@@ -86,6 +94,25 @@ function SmartLoadShedding() {
   const [confirmDialog, setConfirmDialog] = useState({ isOpen: false });
   const [loadingZone, setLoadingZone] = useState(null);
   const [showMqttPanel, setShowMqttPanel] = useState(false);
+  const [showRelaySelector, setShowRelaySelector] = useState(false);
+  const [selectedRelays, setSelectedRelays] = useState(['POWER']); // Par défaut: seulement POWER
+  const [pendingAction, setPendingAction] = useState(null); // { zone, action }
+  const [zoneRelayStats, setZoneRelayStats] = useState({}); // { zoneId: { relayStats, summary } }
+
+  // Charger les statistiques des relais pour chaque zone
+  useEffect(() => {
+    const loadRelayStats = async () => {
+      for (const zone of zones) {
+        try {
+          const stats = await gridService.getZoneRelays(zone.id);
+          setZoneRelayStats(prev => ({ ...prev, [zone.id]: stats }));
+        } catch (error) {
+          console.error(`Erreur chargement stats relais pour ${zone.id}:`, error);
+        }
+      }
+    };
+    loadRelayStats();
+  }, [zones.length]);
 
   // Simuler les mises à jour temps réel
   useEffect(() => {
@@ -104,61 +131,102 @@ function SmartLoadShedding() {
   const handleLoadShedding = async (zone, action) => {
     const isActivate = action === 'SHED';
     
+    // Si activation, afficher le sélecteur de relais
+    if (isActivate) {
+      setPendingAction({ zone, action });
+      setShowRelaySelector(true);
+      return;
+    }
+    
+    // Si restauration, procéder directement
     setConfirmDialog({
       isOpen: true,
-      title: isActivate ? `Activer le délestage sur ${zone.name} ?` : `Rétablir l'alimentation sur ${zone.name} ?`,
-      message: isActivate 
-        ? `Cette action enverra la commande CMD_REDUCE_LOAD à ${zone.heavyLoadsActive} boîtiers IoT via MQTT. Les climatiseurs et chauffe-eau seront coupés. L'éclairage et les services vitaux resteront actifs.`
-        : `Cette action enverra la commande CMD_RESTORE à tous les boîtiers de la zone ${zone.name}.`,
-      type: isActivate ? 'warning' : 'info',
-      confirmText: isActivate ? 'Activer délestage' : 'Rétablir',
+      title: `Rétablir l'alimentation sur ${zone.name} ?`,
+      message: `Cette action enverra la commande CMD_RESTORE à tous les boîtiers de la zone ${zone.name}.`,
+      type: 'info',
+      confirmText: 'Rétablir',
       onConfirm: async () => {
         setConfirmDialog({ isOpen: false });
         setLoadingZone(zone.id);
-        
-        // Simuler l'envoi MQTT
-        notify.info(`Envoi commande MQTT: ${isActivate ? 'CMD_REDUCE_LOAD' : 'CMD_RESTORE'}...`, {
-          title: '📡 Broker Mosquitto',
-        });
-
-        await new Promise(resolve => setTimeout(resolve, 2000));
-
-        // Ajouter au log MQTT
-        const newLogEntry = {
-          id: Date.now(),
-          timestamp: new Date().toISOString(),
-          zone: zone.name,
-          command: isActivate ? 'CMD_REDUCE_LOAD' : 'CMD_RESTORE',
-          status: 'DELIVERED',
-          metersAffected: zone.heavyLoadsActive,
-        };
-        setMqttLog(prev => [newLogEntry, ...prev]);
-
-        // Mettre à jour la zone
-        setZones(prev => prev.map(z => {
-          if (z.id === zone.id) {
-            return {
-              ...z,
-              loadPercentage: isActivate ? z.loadPercentage - z.estimatedReduction : z.loadPercentage + 15,
-              status: isActivate ? 'SHEDDING' : (z.loadPercentage > 85 ? 'CRITICAL' : z.loadPercentage > 70 ? 'WARNING' : 'NORMAL'),
-            };
-          }
-          return z;
-        }));
-
+        await executeLoadShedding(zone, action, null);
         setLoadingZone(null);
-        
-        notify.grid(
-          isActivate 
-            ? `Délestage activé sur ${zone.name}. ${zone.heavyLoadsActive} appareils lourds coupés.`
-            : `Alimentation rétablie sur ${zone.name}.`,
-          {
-            title: isActivate ? '⚡ Délestage Sélectif Actif' : '✅ Mode Normal Rétabli',
-            duration: 5000,
-          }
-        );
       },
     });
+  };
+
+  const handleRelaySelectionConfirm = () => {
+    if (pendingAction && selectedRelays.length > 0) {
+      setShowRelaySelector(false);
+      const { zone, action } = pendingAction;
+      setPendingAction(null);
+      
+      setConfirmDialog({
+        isOpen: true,
+        title: `Activer le délestage sélectif sur ${zone.name} ?`,
+        message: `Cette action coupera les relais suivants sur ${zone.onlineMeters} boîtiers IoT :\n\n${selectedRelays.map(r => {
+          const relay = RELAY_TYPES.find(rt => rt.id === r);
+          return `• ${relay?.label || r}`;
+        }).join('\n')}\n\nL'éclairage et les services vitaux resteront actifs.`,
+        type: 'warning',
+        confirmText: 'Activer délestage',
+        onConfirm: async () => {
+          setConfirmDialog({ isOpen: false });
+          setLoadingZone(zone.id);
+          await executeLoadShedding(zone, action, selectedRelays);
+          setLoadingZone(null);
+        },
+      });
+    }
+  };
+
+  const executeLoadShedding = async (zone, action, targetRelays) => {
+    const isActivate = action === 'SHED';
+    
+    try {
+      const commandType = isActivate ? 'SHED_HEAVY_LOADS' : 'RESTORE';
+      const result = await gridService.triggerLoadShedding(zone.id, commandType, targetRelays);
+      
+      notify.success(
+        isActivate 
+          ? `Délestage activé sur ${zone.name}. ${result.metersAffected} boîtiers affectés.${targetRelays ? ` Relais: ${targetRelays.join(', ')}` : ''}`
+          : `Alimentation rétablie sur ${zone.name}`,
+        {
+          title: isActivate ? '⚡ Délestage Sélectif Actif' : '✅ Mode Normal Rétabli',
+          duration: 5000,
+        }
+      );
+
+      // Mettre à jour la zone
+      setZones(prev => prev.map(z => {
+        if (z.id === zone.id) {
+          return {
+            ...z,
+            loadPercentage: isActivate ? Math.max(50, z.loadPercentage - z.estimatedReduction) : z.loadPercentage + 15,
+            status: isActivate ? 'SHEDDING' : (z.loadPercentage > 85 ? 'CRITICAL' : z.loadPercentage > 70 ? 'WARNING' : 'NORMAL'),
+          };
+        }
+        return z;
+      }));
+
+      // Ajouter au log MQTT
+      const newLogEntry = {
+        id: Date.now(),
+        timestamp: new Date().toISOString(),
+        zone: zone.name,
+        command: isActivate ? 'CMD_REDUCE_LOAD' : 'CMD_RESTORE',
+        status: 'DELIVERED',
+        metersAffected: result.metersAffected,
+        targetRelays: targetRelays || 'ALL',
+      };
+      setMqttLog(prev => [newLogEntry, ...prev]);
+    } catch (error) {
+      console.error('Erreur délestage:', error);
+      notify.error(error.response?.data?.error || 'Erreur lors du délestage', {
+        title: 'Échec du délestage',
+      });
+    } finally {
+      setLoadingZone(null);
+    }
   };
 
   const getStatusConfig = (status) => {
@@ -332,6 +400,28 @@ function SmartLoadShedding() {
                 </div>
               </div>
 
+              {/* Statistiques des relais */}
+              {zoneRelayStats[zone.id] && (
+                <div className="mb-4 p-3 bg-white/50 dark:bg-gray-800/50 rounded-lg">
+                  <p className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-2">État des Relais Smart Panel :</p>
+                  <div className="grid grid-cols-3 gap-2">
+                    {Object.entries(zoneRelayStats[zone.id].relayStats).map(([type, stats]) => {
+                      const relayType = RELAY_TYPES.find(r => r.id === type);
+                      if (!relayType) return null;
+                      const Icon = relayType.icon;
+                      const enabledPercent = stats.total > 0 ? (stats.enabled / stats.total * 100).toFixed(0) : 0;
+                      return (
+                        <div key={type} className="text-center p-2 bg-gray-100 dark:bg-gray-700/50 rounded">
+                          <Icon className={`w-4 h-4 mx-auto mb-1 ${stats.enabled > 0 ? 'text-success-500' : 'text-gray-400'}`} />
+                          <p className="text-xs font-bold text-gray-900 dark:text-gray-100">{enabledPercent}%</p>
+                          <p className="text-[10px] text-gray-500">{stats.enabled}/{stats.total}</p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               {/* Info délestage */}
               <div className="p-3 bg-white/50 dark:bg-gray-800/50 rounded-lg mb-4">
                 <div className="flex items-center justify-between text-sm">
@@ -433,6 +523,125 @@ function SmartLoadShedding() {
           onClose={() => setSelectedZone(null)}
           onLoadShedding={(action) => handleLoadShedding(selectedZone, action)}
         />
+      )}
+
+      {/* Sélecteur de relais */}
+      {showRelaySelector && pendingAction && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={() => setShowRelaySelector(false)}>
+          <div 
+            className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-md w-full animate-fade-in-scale"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="p-6 border-b border-gray-200 dark:border-gray-700">
+              <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100">
+                Sélectionner les Relais à Couper
+              </h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                Zone: {pendingAction.zone.name} • {pendingAction.zone.onlineMeters} boîtiers IoT
+              </p>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <p className="text-sm text-gray-700 dark:text-gray-300">
+                Choisissez quels circuits électriques couper lors du délestage :
+              </p>
+
+              {RELAY_TYPES.map((relayType) => {
+                const Icon = relayType.icon;
+                const isSelected = selectedRelays.includes(relayType.id);
+                const isEssential = relayType.id === 'ESSENTIAL';
+
+                return (
+                  <div
+                    key={relayType.id}
+                    onClick={() => {
+                      if (isEssential) {
+                        notify.warning('Le relais ESSENTIEL ne peut pas être coupé (services vitaux)', {
+                          title: 'Relais protégé',
+                        });
+                        return;
+                      }
+                      if (isSelected) {
+                        setSelectedRelays(prev => prev.filter(r => r !== relayType.id));
+                      } else {
+                        setSelectedRelays(prev => [...prev, relayType.id]);
+                      }
+                    }}
+                    className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${
+                      isSelected
+                        ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
+                        : isEssential
+                        ? 'border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 opacity-60 cursor-not-allowed'
+                        : 'border-gray-200 dark:border-gray-700 hover:border-primary-300 dark:hover:border-primary-700'
+                    }`}
+                  >
+                    <div className="flex items-start space-x-3">
+                      <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                        isSelected
+                          ? 'bg-primary-500 text-white'
+                          : isEssential
+                          ? 'bg-gray-300 dark:bg-gray-600 text-gray-500'
+                          : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
+                      }`}>
+                        <Icon className="w-5 h-5" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between">
+                          <h4 className="font-bold text-gray-900 dark:text-gray-100">
+                            {relayType.label}
+                          </h4>
+                          {isSelected && (
+                            <CheckCircle className="w-5 h-5 text-primary-500" />
+                          )}
+                          {isEssential && (
+                            <span className="text-xs bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 px-2 py-1 rounded">
+                              PROTÉGÉ
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                          {relayType.description}
+                        </p>
+                        {zoneRelayStats[pendingAction.zone.id]?.relayStats[relayType.id] && (
+                          <p className="text-xs text-primary-600 dark:text-primary-400 mt-1">
+                            {zoneRelayStats[pendingAction.zone.id].relayStats[relayType.id].enabled} relais actifs sur {zoneRelayStats[pendingAction.zone.id].relayStats[relayType.id].total}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+
+              {selectedRelays.length === 0 && (
+                <p className="text-sm text-amber-600 dark:text-amber-400 flex items-center space-x-2">
+                  <AlertTriangle className="w-4 h-4" />
+                  <span>Veuillez sélectionner au moins un relais à couper</span>
+                </p>
+              )}
+            </div>
+
+            <div className="p-6 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-3">
+              <button
+                onClick={() => {
+                  setShowRelaySelector(false);
+                  setPendingAction(null);
+                  setSelectedRelays(['POWER']); // Réinitialiser
+                }}
+                className="btn-secondary"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={handleRelaySelectionConfirm}
+                disabled={selectedRelays.length === 0}
+                className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Confirmer ({selectedRelays.length} relais)
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Dialog de confirmation */}

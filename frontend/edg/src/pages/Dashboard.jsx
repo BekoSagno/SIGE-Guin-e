@@ -26,6 +26,8 @@ import PersonnelManagement from '../components/PersonnelManagement';
 import TaskManagement from '../components/TaskManagement';
 import TaskReports from '../components/TaskReports';
 import SigeIdSearch from '../components/SigeIdSearch';
+import NewUsersSection from '../components/NewUsersSection';
+import NotificationCenter from '../components/NotificationCenter';
 
 function Dashboard() {
   const notify = useNotification();
@@ -220,6 +222,12 @@ function Dashboard() {
             <ClientsManagement />
           )}
           
+          {activeSection === 'new-users' && (
+            <div className="space-y-6 animate-fade-in">
+              <NewUsersSection />
+            </div>
+          )}
+          
           {activeSection === 'monitoring' && (
             <NetworkMonitoring stats={stats} />
           )}
@@ -257,7 +265,9 @@ function Dashboard() {
           )}
           
           {activeSection === 'notifications' && (
-            <AlertsSection incidents={stats.recentIncidents} fraudCount={stats.fraudAlerts} />
+            <div className="space-y-6 animate-fade-in">
+              <NotificationCenter />
+            </div>
           )}
           
           {activeSection === 'personnel' && (
@@ -530,19 +540,6 @@ function TransformerCard({ transformer }) {
 }
 
 // ==================== SECTIONS PLACEHOLDER ====================
-
-function AlertsSection({ incidents, fraudCount }) {
-  return (
-    <div className="space-y-6 animate-fade-in">
-      <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Centre d'Alertes</h2>
-      <div className="card">
-        <p className="text-gray-600 dark:text-gray-400">
-          {incidents.length + fraudCount} alertes actives
-        </p>
-      </div>
-    </div>
-  );
-}
 
 function SettingsSection({ user }) {
   return (

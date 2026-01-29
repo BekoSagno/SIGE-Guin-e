@@ -2,6 +2,7 @@ import express from 'express';
 import { body, validationResult } from 'express-validator';
 import { authMiddleware } from '../middleware/authMiddleware.js';
 import { querySQLObjects, executeSQL, generateUUID } from '../services/sqlService.js';
+import mqttService from '../services/mqttService.js';
 
 const router = express.Router();
 
@@ -107,6 +108,44 @@ router.post('/', authMiddleware, [
           `UPDATE financials SET balance = balance + ${amount}, updated_at = '${now}' WHERE home_id = '${toHomeId}'`,
           []
         );
+      }
+
+      // Créer un EnergyQuota pour le foyer destinataire
+      // Récupérer le compteur IoT du foyer destinataire
+      const destMeters = await querySQLObjects(
+        `SELECT id FROM meters WHERE home_id = '${toHomeId}' AND status = 'ONLINE' LIMIT 1`,
+        [],
+        ['id']
+      );
+
+      if (destMeters.length > 0) {
+        const meterId = destMeters[0].id;
+        
+        // Calculer le quota en kWh (taux: 1 kWh = 1000 GNF)
+        const tariffPerKwh = 1000;
+        const quotaKwh = amount / tariffPerKwh;
+        
+        // Créer le quota
+        const quotaId = generateUUID();
+        await executeSQL(
+          `INSERT INTO energy_quotas (id, home_id, meter_id, quota_kwh, quota_gnf, is_active, created_at, updated_at)
+           VALUES ('${quotaId}', '${toHomeId}', '${meterId}', ${quotaKwh}, ${amount}, true, '${now}', '${now}')`,
+          []
+        );
+
+        // Envoyer un signal MQTT au Kit IoT pour notifier du nouveau quota
+        try {
+          await mqttService.sendQuotaNotification(meterId, {
+            quotaId,
+            quotaKwh,
+            quotaGnf: amount,
+            transactionId,
+          });
+          console.log(`📡 Signal IoT envoyé au compteur ${meterId} pour quota de ${quotaKwh.toFixed(4)} kWh`);
+        } catch (mqttError) {
+          console.error('⚠️ Erreur envoi signal IoT (non bloquant):', mqttError);
+          // Ne pas bloquer le transfert si MQTT échoue
+        }
       }
     }
 

@@ -2,11 +2,12 @@ import { useState, useEffect } from 'react';
 import { 
   AlertTriangle, MapPin, Camera, Clock, User, Phone, CheckCircle, 
   Send, Navigation, Eye, MessageSquare, Truck, XCircle, ChevronRight,
-  Image, Calendar, Filter, Search, Bell, UserCheck
+  Image, Calendar, Filter, Search, Bell, UserCheck, X, Mail
 } from 'lucide-react';
 import { useNotification, ConfirmDialog } from './Notification';
+import { incidentsService, notificationService } from '@common/services';
 
-// Données simulées des incidents citoyens
+// Données simulées des incidents citoyens (fallback)
 const MOCK_INCIDENTS = [
   {
     id: 'INC-2024-001',
@@ -137,7 +138,8 @@ const AVAILABLE_TEAMS = [
 
 function IncidentDispatch() {
   const notify = useNotification();
-  const [incidents, setIncidents] = useState(MOCK_INCIDENTS);
+  const [incidents, setIncidents] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [selectedIncident, setSelectedIncident] = useState(null);
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterType, setFilterType] = useState('all');
@@ -145,6 +147,53 @@ function IncidentDispatch() {
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [incidentToAssign, setIncidentToAssign] = useState(null);
   const [confirmDialog, setConfirmDialog] = useState({ isOpen: false });
+  const [activeTab, setActiveTab] = useState('all'); // all, open, alerts
+
+  // Charger les incidents depuis l'API
+  useEffect(() => {
+    loadIncidents();
+    const interval = setInterval(loadIncidents, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const loadIncidents = async () => {
+    try {
+      setLoading(true);
+      const data = await incidentsService.getIncidents();
+      const apiIncidents = (data.incidents || []).map(inc => ({
+        id: inc.id,
+        type: inc.incidentType || 'AUTRE',
+        priority: inc.incidentType === 'FRAUDE_SUSPECTEE' ? 'HIGH' : 
+                 inc.incidentType === 'PANNE' || inc.incidentType === 'COUPURE' ? 'MEDIUM' : 'LOW',
+        status: inc.status || 'OPEN',
+        description: inc.description,
+        reportedBy: {
+          name: inc.reporter?.nom || 'Citoyen anonyme',
+          phone: inc.reporter?.telephone || '',
+          email: inc.reporter?.email || '',
+        },
+        location: {
+          address: inc.home?.ville || 'Non spécifié',
+          lat: inc.latitude,
+          lng: inc.longitude,
+          zone: inc.home?.ville || '',
+        },
+        photos: inc.photoUrl ? [{ id: 1, url: `http://localhost:5000${inc.photoUrl}`, caption: 'Photo incident' }] : [],
+        createdAt: inc.createdAt,
+        updatedAt: inc.updatedAt,
+        closedAt: inc.closedAt,
+        assignedTeam: inc.status === 'DISPATCHED' ? { id: 'TEAM-001', name: 'Équipe assignée' } : null,
+        estimatedResolution: null,
+        updates: [],
+      }));
+      setIncidents(apiIncidents.length > 0 ? apiIncidents : MOCK_INCIDENTS);
+    } catch (error) {
+      console.error('Erreur chargement incidents:', error);
+      setIncidents(MOCK_INCIDENTS); // Fallback sur données mockées
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleAssignTeam = (incident, team) => {
     setConfirmDialog({
@@ -225,12 +274,17 @@ function IncidentDispatch() {
   };
 
   const filteredIncidents = incidents.filter(inc => {
+    // Filtrer par onglet actif
+    if (activeTab === 'open' && inc.status !== 'OPEN') return false;
+    if (activeTab === 'alerts' && inc.status !== 'OPEN') return false;
+    
     const matchesStatus = filterStatus === 'all' || inc.status === filterStatus;
     const matchesType = filterType === 'all' || inc.type === filterType;
     const matchesSearch = searchQuery === '' || 
-      inc.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      inc.reportedBy.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      inc.location.address.toLowerCase().includes(searchQuery.toLowerCase());
+      (inc.description && inc.description.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (inc.reportedBy?.name && inc.reportedBy.name.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (inc.location?.address && inc.location.address.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (inc.location?.zone && inc.location.zone.toLowerCase().includes(searchQuery.toLowerCase()));
     return matchesStatus && matchesType && matchesSearch;
   });
 
@@ -245,8 +299,9 @@ function IncidentDispatch() {
     switch (type) {
       case 'PANNE': return { icon: AlertTriangle, color: 'amber', label: 'Panne' };
       case 'COUPURE': return { icon: XCircle, color: 'red', label: 'Coupure' };
+      case 'FRAUDE_SUSPECTEE': 
       case 'FRAUDE': return { icon: AlertTriangle, color: 'purple', label: 'Fraude suspectée' };
-      default: return { icon: AlertTriangle, color: 'gray', label: type };
+      default: return { icon: AlertTriangle, color: 'gray', label: type || 'AUTRE' };
     }
   };
 
@@ -261,10 +316,28 @@ function IncidentDispatch() {
   const getStatusConfig = (status) => {
     switch (status) {
       case 'OPEN': return { badge: 'badge-danger', label: 'Ouvert', color: 'red' };
-      case 'IN_PROGRESS': return { badge: 'badge-warning', label: 'En cours', color: 'amber' };
-      case 'RESOLVED': return { badge: 'badge-success', label: 'Résolu', color: 'success' };
+      case 'IN_PROGRESS': 
+      case 'DISPATCHED': return { badge: 'badge-warning', label: 'En cours', color: 'amber' };
+      case 'RESOLVED': 
+      case 'CLOSED': return { badge: 'badge-success', label: 'Résolu', color: 'success' };
       default: return { badge: 'badge-info', label: status, color: 'gray' };
     }
+  };
+
+  const getTimeAgo = (dateString) => {
+    if (!dateString) return 'Date inconnue';
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMins = Math.floor(diffMs / (1000 * 60));
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffMins < 1) return 'À l\'instant';
+    if (diffMins < 60) return `Il y a ${diffMins} min`;
+    if (diffHours < 24) return `Il y a ${diffHours}h`;
+    if (diffDays < 7) return `Il y a ${diffDays} jour${diffDays > 1 ? 's' : ''}`;
+    return date.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' });
   };
 
   return (
@@ -305,39 +378,81 @@ function IncidentDispatch() {
         </div>
       </div>
 
-      {/* Filtres */}
+      {/* Onglets - Layout responsive */}
+      <div className="flex items-center gap-1 sm:gap-2 border-b border-gray-200 dark:border-gray-700 overflow-x-auto scrollbar-hide">
+        <button
+          onClick={() => setActiveTab('all')}
+          className={`px-2 sm:px-4 py-2 font-medium text-xs sm:text-sm transition-colors whitespace-nowrap flex-shrink-0 ${
+            activeTab === 'all'
+              ? 'border-b-2 border-primary-500 text-primary-600 dark:text-primary-400'
+              : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+          }`}
+        >
+          Tous ({stats.total})
+        </button>
+        <button
+          onClick={() => setActiveTab('open')}
+          className={`px-2 sm:px-4 py-2 font-medium text-xs sm:text-sm transition-colors whitespace-nowrap flex-shrink-0 ${
+            activeTab === 'open'
+              ? 'border-b-2 border-primary-500 text-primary-600 dark:text-primary-400'
+              : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+          }`}
+        >
+          En attente ({stats.open})
+        </button>
+        <button
+          onClick={() => setActiveTab('alerts')}
+          className={`px-2 sm:px-4 py-2 font-medium text-xs sm:text-sm transition-colors relative whitespace-nowrap flex-shrink-0 ${
+            activeTab === 'alerts'
+              ? 'border-b-2 border-primary-500 text-primary-600 dark:text-primary-400'
+              : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+          }`}
+        >
+          Alertes
+          {stats.open > 0 && (
+            <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
+              {stats.open > 9 ? '9+' : stats.open}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {/* Filtres - Layout optimisé */}
       <div className="card">
-        <div className="flex flex-col lg:flex-row gap-4">
-          <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+        <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
+          <div className="flex-1 relative min-w-0">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 sm:w-5 sm:h-5 text-gray-400 flex-shrink-0" />
             <input
               type="text"
               placeholder="Rechercher un incident..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="input pl-10"
+              className="input pl-9 sm:pl-10 w-full text-sm sm:text-base"
             />
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+            <Filter className="w-4 h-4 sm:w-5 sm:h-5 text-gray-400 flex-shrink-0 hidden sm:block" />
             <select
               value={filterStatus}
               onChange={(e) => setFilterStatus(e.target.value)}
-              className="input w-auto"
+              className="input text-xs sm:text-sm min-w-[120px] sm:min-w-[140px]"
             >
               <option value="all">Tous les statuts</option>
-              <option value="OPEN">Ouverts</option>
+              <option value="OPEN">Ouvert</option>
               <option value="IN_PROGRESS">En cours</option>
-              <option value="RESOLVED">Résolus</option>
+              <option value="DISPATCHED">Assigné</option>
+              <option value="RESOLVED">Résolu</option>
             </select>
             <select
               value={filterType}
               onChange={(e) => setFilterType(e.target.value)}
-              className="input w-auto"
+              className="input text-xs sm:text-sm min-w-[100px] sm:min-w-[120px]"
             >
               <option value="all">Tous les types</option>
               <option value="PANNE">Panne</option>
               <option value="COUPURE">Coupure</option>
-              <option value="FRAUDE">Fraude</option>
+              <option value="FRAUDE_SUSPECTEE">Fraude</option>
+              <option value="AUTRE">Autre</option>
             </select>
           </div>
         </div>
@@ -362,73 +477,91 @@ function IncidentDispatch() {
             return (
               <div
                 key={incident.id}
-                className={`card border-l-4 border-${statusConfig.color}-500 hover:shadow-lg transition-all cursor-pointer`}
+                className={`card border-l-4 ${
+                  statusConfig.color === 'red' ? 'border-red-500' :
+                  statusConfig.color === 'amber' ? 'border-amber-500' :
+                  'border-green-500'
+                } hover:shadow-lg transition-all cursor-pointer`}
                 onClick={() => setSelectedIncident(incident)}
               >
-                <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
-                  <div className="flex items-start space-x-4">
-                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 bg-${typeConfig.color}-100 dark:bg-${typeConfig.color}-900/30`}>
-                      <TypeIcon className={`w-6 h-6 text-${typeConfig.color}-600 dark:text-${typeConfig.color}-400`} />
+                <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-3 sm:gap-4">
+                  <div className="flex items-start gap-3 sm:gap-4 flex-1 min-w-0">
+                    <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-lg sm:rounded-xl flex items-center justify-center flex-shrink-0 ${
+                      typeConfig.color === 'amber' ? 'bg-amber-100 dark:bg-amber-900/30' :
+                      typeConfig.color === 'red' ? 'bg-red-100 dark:bg-red-900/30' :
+                      typeConfig.color === 'purple' ? 'bg-purple-100 dark:bg-purple-900/30' :
+                      'bg-gray-100 dark:bg-gray-700'
+                    }`}>
+                      <TypeIcon className={`w-5 h-5 sm:w-6 sm:h-6 ${
+                        typeConfig.color === 'amber' ? 'text-amber-600 dark:text-amber-400' :
+                        typeConfig.color === 'red' ? 'text-red-600 dark:text-red-400' :
+                        typeConfig.color === 'purple' ? 'text-purple-600 dark:text-purple-400' :
+                        'text-gray-600 dark:text-gray-400'
+                      }`} />
                     </div>
                     
                     <div className="flex-1 min-w-0">
-                      <div className="flex flex-wrap items-center gap-2 mb-1">
-                        <span className="font-mono text-sm text-primary-600 dark:text-primary-400">{incident.id}</span>
+                      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-1.5">
+                        <span className="font-mono text-xs sm:text-sm text-primary-600 dark:text-primary-400 truncate max-w-[120px] sm:max-w-none">
+                          {incident.id}
+                        </span>
                         <span className={statusConfig.badge}>{statusConfig.label}</span>
                         <span className={priorityConfig.badge}>{priorityConfig.label}</span>
-                        {incident.photos.length > 0 && (
-                          <span className="badge-info flex items-center space-x-1">
+                        {incident.photos && incident.photos.length > 0 && (
+                          <span className="badge-info flex items-center gap-1 text-xs">
                             <Camera className="w-3 h-3" />
                             <span>{incident.photos.length}</span>
                           </span>
                         )}
                       </div>
                       
-                      <h4 className="font-semibold text-gray-900 dark:text-gray-100 line-clamp-2">
+                      <h4 className="font-semibold text-sm sm:text-base text-gray-900 dark:text-gray-100 line-clamp-2 break-words">
                         {incident.description}
                       </h4>
                       
-                      <div className="flex flex-wrap items-center gap-4 mt-2 text-sm text-gray-600 dark:text-gray-400">
-                        <span className="flex items-center space-x-1">
-                          <User className="w-4 h-4" />
-                          <span>{incident.reportedBy.name}</span>
+                      <div className="flex flex-wrap items-center gap-2 sm:gap-3 sm:gap-4 mt-2 text-xs sm:text-sm text-gray-600 dark:text-gray-400">
+                        <span className="flex items-center gap-1 truncate">
+                          <User className="w-3 h-3 sm:w-4 sm:h-4 flex-shrink-0" />
+                          <span className="truncate max-w-[150px] sm:max-w-none">{incident.reportedBy.name}</span>
                         </span>
-                        <span className="flex items-center space-x-1">
-                          <MapPin className="w-4 h-4" />
-                          <span>{incident.location.zone}</span>
+                        <span className="flex items-center gap-1 truncate">
+                          <MapPin className="w-3 h-3 sm:w-4 sm:h-4 flex-shrink-0" />
+                          <span className="truncate">{incident.location.zone || 'Non spécifié'}</span>
                         </span>
-                        <span className="flex items-center space-x-1">
-                          <Clock className="w-4 h-4" />
+                        <span className="flex items-center gap-1">
+                          <Clock className="w-3 h-3 sm:w-4 sm:h-4 flex-shrink-0" />
                           <span>{getTimeAgo(incident.createdAt)}</span>
                         </span>
                       </div>
 
                       {incident.assignedTeam && (
-                        <div className="flex items-center space-x-2 mt-2 p-2 bg-primary-50 dark:bg-primary-900/20 rounded-lg">
-                          <Truck className="w-4 h-4 text-primary-500" />
-                          <span className="text-sm text-primary-700 dark:text-primary-300">
-                            {incident.assignedTeam.name} - ETA: {incident.estimatedResolution}
+                        <div className="flex items-center gap-2 mt-2 p-2 bg-primary-50 dark:bg-primary-900/20 rounded-lg">
+                          <Truck className="w-3 h-3 sm:w-4 sm:h-4 text-primary-500 flex-shrink-0" />
+                          <span className="text-xs sm:text-sm text-primary-700 dark:text-primary-300 truncate">
+                            {incident.assignedTeam.name}
+                            {incident.estimatedResolution && ` - ETA: ${incident.estimatedResolution}`}
                           </span>
                         </div>
                       )}
                     </div>
                   </div>
 
-                  <div className="flex items-center space-x-2 lg:flex-shrink-0">
+                  <div className="flex items-center gap-2 lg:flex-shrink-0">
                     {incident.status === 'OPEN' && (
                       <button
                         onClick={(e) => { e.stopPropagation(); setIncidentToAssign(incident); setShowAssignModal(true); }}
-                        className="btn-primary text-sm px-3 py-2"
+                        className="btn-primary text-xs sm:text-sm px-2 sm:px-3 py-1.5 sm:py-2 whitespace-nowrap"
                       >
-                        <Truck className="w-4 h-4" />
-                        <span>Assigner</span>
+                        <Truck className="w-3 h-3 sm:w-4 sm:h-4" />
+                        <span className="hidden sm:inline">Assigner</span>
                       </button>
                     )}
                     <button
                       onClick={(e) => { e.stopPropagation(); setSelectedIncident(incident); }}
-                      className="btn-secondary text-sm px-3 py-2"
+                      className="btn-secondary text-xs sm:text-sm px-2 sm:px-3 py-1.5 sm:py-2"
+                      title="Voir détails"
                     >
-                      <Eye className="w-4 h-4" />
+                      <Eye className="w-3 h-3 sm:w-4 sm:h-4" />
                     </button>
                   </div>
                 </div>
@@ -474,106 +607,227 @@ function IncidentDispatch() {
 }
 
 function IncidentDetailModal({ incident, onClose, onAssign, onResolve, onNotify }) {
-  const statusConfig = incident.status === 'OPEN' ? 'red' : incident.status === 'IN_PROGRESS' ? 'amber' : 'success';
+  const getStatusColor = () => {
+    if (incident.status === 'OPEN') return 'from-red-500 to-red-600';
+    if (incident.status === 'IN_PROGRESS' || incident.status === 'DISPATCHED') return 'from-amber-500 to-amber-600';
+    return 'from-green-500 to-green-600';
+  };
+
+  // Masquer la sidebar quand le modal est ouvert
+  useEffect(() => {
+    // Sélectionner la sidebar (plusieurs sélecteurs possibles)
+    const sidebar = document.querySelector('nav[class*="Sidebar"], nav[class*="sidebar"], [id*="sidebar"], [id*="Sidebar"]') ||
+                    document.querySelector('aside') ||
+                    document.querySelector('[class*="sidebar"]');
+    
+    // Masquer la sidebar
+    if (sidebar) {
+      sidebar.style.display = 'none';
+    }
+    
+    // Empêcher le scroll du body
+    document.body.style.overflow = 'hidden';
+    
+    return () => {
+      // Restaurer la sidebar
+      if (sidebar) {
+        sidebar.style.display = '';
+      }
+      // Restaurer le scroll
+      document.body.style.overflow = '';
+    };
+  }, []);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={onClose}>
       <div 
-        className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto animate-fade-in-scale"
+        className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col animate-fade-in-scale overflow-hidden border border-gray-200 dark:border-gray-700"
         onClick={e => e.stopPropagation()}
       >
-        <div className={`p-6 bg-gradient-to-r from-${statusConfig}-500 to-${statusConfig}-600`}>
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-white/80 font-mono">{incident.id}</p>
-              <h3 className="text-xl font-bold text-white mt-1">{incident.description}</h3>
+        {/* Header élégant avec bouton fermer */}
+        <div className={`relative p-5 bg-gradient-to-r ${getStatusColor()} flex-shrink-0`}>
+          <button
+            onClick={onClose}
+            className="absolute top-4 right-4 w-8 h-8 rounded-full bg-white/20 hover:bg-white/30 backdrop-blur-sm text-white flex items-center justify-center transition-all hover:scale-110 z-10 shadow-lg"
+            aria-label="Fermer"
+          >
+            <X className="w-5 h-5" />
+          </button>
+          <div className="flex items-start justify-between gap-4 pr-12">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="px-2.5 py-1 rounded-md text-xs font-mono bg-white/20 text-white/90 backdrop-blur-sm">
+                  {incident.id}
+                </span>
+                <span className="px-3 py-1 rounded-full text-xs font-semibold bg-white/25 text-white backdrop-blur-sm">
+                  {incident.status === 'OPEN' ? 'OUVERT' : incident.status === 'IN_PROGRESS' || incident.status === 'DISPATCHED' ? 'EN COURS' : 'RÉSOLU'}
+                </span>
+              </div>
+              <h3 className="text-lg font-bold text-white leading-tight">
+                {incident.description}
+              </h3>
             </div>
-            <span className="px-3 py-1 rounded-lg text-sm font-bold bg-white/20 text-white">
-              {incident.status}
-            </span>
           </div>
         </div>
         
-        <div className="p-6 space-y-6">
-          {/* Photos */}
-          {incident.photos.length > 0 && (
-            <div>
-              <h4 className="font-semibold text-gray-900 dark:text-gray-100 mb-3 flex items-center space-x-2">
-                <Camera className="w-5 h-5 text-primary-500" />
-                <span>Photos jointes ({incident.photos.length})</span>
-              </h4>
-              <div className="grid grid-cols-2 gap-4">
+        {/* Contenu scrollable */}
+        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+          {/* Photos - Design élégant */}
+          {incident.photos && incident.photos.length > 0 && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 pb-2 border-b border-gray-200 dark:border-gray-700">
+                <div className="p-2 bg-primary-100 dark:bg-primary-900/30 rounded-lg">
+                  <Camera className="w-5 h-5 text-primary-600 dark:text-primary-400" />
+                </div>
+                <h4 className="font-semibold text-base text-gray-900 dark:text-gray-100">
+                  Photos jointes <span className="text-sm text-gray-500 dark:text-gray-400">({incident.photos.length})</span>
+                </h4>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {incident.photos.map((photo) => (
-                  <div key={photo.id} className="relative rounded-xl overflow-hidden">
-                    <img src={photo.url} alt={photo.caption} className="w-full h-48 object-cover" />
-                    <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-sm p-2">
-                      {photo.caption}
-                    </div>
+                  <div key={photo.id} className="relative group rounded-xl overflow-hidden bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 shadow-sm hover:shadow-md transition-shadow">
+                    <img 
+                      src={photo.url} 
+                      alt={photo.caption || 'Photo incident'} 
+                      className="w-full h-48 object-cover"
+                      onError={(e) => {
+                        e.target.onerror = null;
+                        e.target.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="400" height="300"%3E%3Crect fill="%23e5e7eb" width="400" height="300"/%3E%3Ctext fill="%239ca3af" x="50%25" y="50%25" text-anchor="middle" dy=".3em" font-size="14"%3EImage non disponible%3C/text%3E%3C/svg%3E';
+                      }}
+                    />
+                    {photo.caption && (
+                      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent text-white text-xs p-3">
+                        {photo.caption}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
             </div>
           )}
 
-          {/* Informations */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="p-4 bg-gray-50 dark:bg-gray-700/50 rounded-xl">
-              <h5 className="font-semibold text-gray-900 dark:text-gray-100 mb-2 flex items-center space-x-2">
-                <User className="w-4 h-4 text-primary-500" />
-                <span>Signalé par</span>
-              </h5>
-              <p className="text-gray-900 dark:text-gray-100">{incident.reportedBy.name}</p>
-              <p className="text-sm text-gray-500">{incident.reportedBy.phone}</p>
-              <p className="text-sm text-gray-500">{incident.reportedBy.email}</p>
+          {/* Informations - Design professionnel */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="p-5 bg-gradient-to-br from-gray-50 to-gray-100/50 dark:from-gray-700/50 dark:to-gray-800/50 rounded-xl border border-gray-200 dark:border-gray-600 shadow-sm">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-2.5 bg-primary-100 dark:bg-primary-900/30 rounded-lg">
+                  <User className="w-5 h-5 text-primary-600 dark:text-primary-400" />
+                </div>
+                <h5 className="font-semibold text-base text-gray-900 dark:text-gray-100">
+                  Signalé par
+                </h5>
+              </div>
+              <div className="space-y-2 pl-12">
+                <p className="text-base font-semibold text-gray-900 dark:text-gray-100">
+                  {incident.reportedBy?.name || 'Non spécifié'}
+                </p>
+                {incident.reportedBy?.phone && (
+                  <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                    <Phone className="w-4 h-4" />
+                    <a href={`tel:${incident.reportedBy.phone}`} className="hover:text-primary-600 dark:hover:text-primary-400 transition-colors">
+                      {incident.reportedBy.phone}
+                    </a>
+                  </div>
+                )}
+                {incident.reportedBy?.email && (
+                  <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                    <Mail className="w-4 h-4" />
+                    <a href={`mailto:${incident.reportedBy.email}`} className="hover:text-primary-600 dark:hover:text-primary-400 transition-colors truncate">
+                      {incident.reportedBy.email}
+                    </a>
+                  </div>
+                )}
+              </div>
             </div>
             
-            <div className="p-4 bg-gray-50 dark:bg-gray-700/50 rounded-xl">
-              <h5 className="font-semibold text-gray-900 dark:text-gray-100 mb-2 flex items-center space-x-2">
-                <MapPin className="w-4 h-4 text-primary-500" />
-                <span>Localisation</span>
-              </h5>
-              <p className="text-gray-900 dark:text-gray-100">{incident.location.address}</p>
-              <p className="text-sm text-gray-500">{incident.location.zone}</p>
-              <p className="text-xs text-gray-400 mt-1">
-                GPS: {incident.location.lat.toFixed(4)}, {incident.location.lng.toFixed(4)}
-              </p>
+            <div className="p-5 bg-gradient-to-br from-gray-50 to-gray-100/50 dark:from-gray-700/50 dark:to-gray-800/50 rounded-xl border border-gray-200 dark:border-gray-600 shadow-sm">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-2.5 bg-primary-100 dark:bg-primary-900/30 rounded-lg">
+                  <MapPin className="w-5 h-5 text-primary-600 dark:text-primary-400" />
+                </div>
+                <h5 className="font-semibold text-base text-gray-900 dark:text-gray-100">
+                  Localisation
+                </h5>
+              </div>
+              <div className="space-y-2 pl-12">
+                <p className="text-base font-semibold text-gray-900 dark:text-gray-100">
+                  {incident.location?.address || incident.location?.zone || 'Non spécifié'}
+                </p>
+                {incident.location?.zone && incident.location?.address !== incident.location?.zone && (
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    Zone: {incident.location.zone}
+                  </p>
+                )}
+                {incident.location?.lat && incident.location?.lng && (
+                  <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-500 font-mono bg-gray-200/50 dark:bg-gray-700/50 px-2 py-1 rounded">
+                    <Navigation className="w-3 h-3" />
+                    <span>{incident.location.lat.toFixed(4)}, {incident.location.lng.toFixed(4)}</span>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
-          {/* Équipe assignée */}
+          {/* Équipe assignée - Design élégant */}
           {incident.assignedTeam && (
-            <div className="p-4 bg-primary-50 dark:bg-primary-900/20 rounded-xl">
-              <h5 className="font-semibold text-primary-800 dark:text-primary-200 mb-2 flex items-center space-x-2">
-                <Truck className="w-4 h-4" />
-                <span>Équipe assignée</span>
-              </h5>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-primary-900 dark:text-primary-100">{incident.assignedTeam.name}</p>
-                  <p className="text-sm text-primary-600 dark:text-primary-400">
+            <div className="p-5 bg-gradient-to-br from-primary-50 to-primary-100/50 dark:from-primary-900/20 dark:to-primary-800/30 rounded-xl border border-primary-200 dark:border-primary-700 shadow-sm">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-2.5 bg-primary-200 dark:bg-primary-800/50 rounded-lg">
+                  <Truck className="w-5 h-5 text-primary-700 dark:text-primary-300" />
+                </div>
+                <h5 className="font-semibold text-base text-primary-900 dark:text-primary-100">
+                  Équipe assignée
+                </h5>
+              </div>
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pl-12">
+                <div className="flex-1 min-w-0">
+                  <p className="text-base font-semibold text-primary-900 dark:text-primary-100 mb-1">
+                    {incident.assignedTeam.name}
+                  </p>
+                  <p className="text-sm text-primary-700 dark:text-primary-300">
                     Chef: {incident.assignedTeam.leader} • {incident.assignedTeam.members} membres
                   </p>
                 </div>
-                <a href={`tel:${incident.assignedTeam.phone}`} className="btn-primary text-sm px-3 py-2">
-                  <Phone className="w-4 h-4" />
-                  <span>Appeler</span>
-                </a>
+                {incident.assignedTeam.phone && (
+                  <a 
+                    href={`tel:${incident.assignedTeam.phone}`} 
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg text-sm font-medium transition-colors shadow-sm hover:shadow-md whitespace-nowrap"
+                  >
+                    <Phone className="w-4 h-4" />
+                    <span>Appeler</span>
+                  </a>
+                )}
               </div>
             </div>
           )}
 
-          {/* Timeline des mises à jour */}
-          {incident.updates.length > 0 && (
-            <div>
-              <h4 className="font-semibold text-gray-900 dark:text-gray-100 mb-3">Historique</h4>
-              <div className="space-y-3">
+          {/* Timeline des mises à jour - Design professionnel */}
+          {incident.updates && incident.updates.length > 0 && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-3 pb-2 border-b border-gray-200 dark:border-gray-700">
+                <div className="p-2 bg-primary-100 dark:bg-primary-900/30 rounded-lg">
+                  <Clock className="w-5 h-5 text-primary-600 dark:text-primary-400" />
+                </div>
+                <h4 className="font-semibold text-base text-gray-900 dark:text-gray-100">
+                  Historique
+                </h4>
+              </div>
+              <div className="space-y-3 pl-4 border-l-2 border-primary-200 dark:border-primary-700">
                 {incident.updates.map((update, idx) => (
-                  <div key={idx} className="flex items-start space-x-3">
-                    <div className="w-2 h-2 bg-primary-500 rounded-full mt-2"></div>
-                    <div>
-                      <p className="text-sm text-gray-900 dark:text-gray-100">{update.message}</p>
-                      <p className="text-xs text-gray-500">
-                        {new Date(update.time).toLocaleString('fr-FR')} • {update.author}
+                  <div key={idx} className="relative -left-[9px]">
+                    <div className="absolute -left-2 top-2 w-4 h-4 bg-primary-500 rounded-full border-2 border-white dark:border-gray-800"></div>
+                    <div className="ml-6 p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-200 dark:border-gray-600">
+                      <p className="text-sm text-gray-900 dark:text-gray-100 mb-1">
+                        {update.message}
+                      </p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        {new Date(update.time).toLocaleString('fr-FR', { 
+                          day: '2-digit', 
+                          month: 'short', 
+                          year: 'numeric',
+                          hour: '2-digit', 
+                          minute: '2-digit' 
+                        })} • {update.author}
                       </p>
                     </div>
                   </div>
@@ -583,28 +837,65 @@ function IncidentDetailModal({ incident, onClose, onAssign, onResolve, onNotify 
           )}
         </div>
         
-        <div className="p-6 border-t border-gray-200 dark:border-gray-700 flex flex-wrap justify-end gap-3">
-          <button onClick={onClose} className="btn-secondary">Fermer</button>
-          <button onClick={onNotify} className="btn-secondary">
-            <Bell className="w-4 h-4" />
-            <span>Notifier citoyen</span>
-          </button>
-          <button className="btn-primary">
-            <Navigation className="w-4 h-4" />
-            <span>Ouvrir GPS</span>
-          </button>
-          {incident.status === 'OPEN' && (
-            <button onClick={onAssign} className="btn-warning">
-              <Truck className="w-4 h-4" />
-              <span>Assigner équipe</span>
+        {/* Footer avec actions - Design professionnel */}
+        <div className="p-5 border-t border-gray-200 dark:border-gray-700 flex flex-wrap items-center justify-between gap-3 flex-shrink-0 bg-gray-50/50 dark:bg-gray-800/30">
+          <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+            <Clock className="w-4 h-4" />
+            <span>
+              Créé le {new Date(incident.createdAt).toLocaleDateString('fr-FR', { 
+                day: '2-digit', 
+                month: 'long', 
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+              })}
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {incident.location?.lat && incident.location?.lng && (
+              <button 
+                onClick={() => window.open(`https://www.google.com/maps?q=${incident.location.lat},${incident.location.lng}`, '_blank')}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-lg text-sm font-medium transition-colors"
+              >
+                <Navigation className="w-4 h-4" />
+                <span>GPS</span>
+              </button>
+            )}
+            {incident.status === 'OPEN' && (
+              <>
+                <button 
+                  onClick={onNotify} 
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-lg text-sm font-medium transition-colors"
+                >
+                  <Bell className="w-4 h-4" />
+                  <span>Notifier</span>
+                </button>
+                <button 
+                  onClick={onAssign} 
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg text-sm font-medium transition-colors shadow-sm hover:shadow-md"
+                >
+                  <Truck className="w-4 h-4" />
+                  <span>Assigner</span>
+                </button>
+              </>
+            )}
+            {(incident.status === 'IN_PROGRESS' || incident.status === 'DISPATCHED') && (
+              <button 
+                onClick={onResolve} 
+                className="inline-flex items-center gap-2 px-4 py-2 bg-success-600 hover:bg-success-700 text-white rounded-lg text-sm font-medium transition-colors shadow-sm hover:shadow-md"
+              >
+                <CheckCircle className="w-4 h-4" />
+                <span>Résoudre</span>
+              </button>
+            )}
+            <button 
+              onClick={onClose} 
+              className="inline-flex items-center gap-2 px-4 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-lg text-sm font-medium transition-colors"
+            >
+              <X className="w-4 h-4" />
+              <span>Fermer</span>
             </button>
-          )}
-          {incident.status === 'IN_PROGRESS' && (
-            <button onClick={onResolve} className="btn-success">
-              <CheckCircle className="w-4 h-4" />
-              <span>Clôturer</span>
-            </button>
-          )}
+          </div>
         </div>
       </div>
     </div>

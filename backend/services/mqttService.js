@@ -27,6 +27,8 @@ const MQTT_COMMANDS = {
   CMD_EMERGENCY_CUTOFF: 'CMD_EMERGENCY_CUTOFF', // Coupure d'urgence totale
   CMD_READ_STATUS: 'CMD_READ_STATUS', // Demander le statut
   CMD_REBOOT: 'CMD_REBOOT', // Redémarrer le boîtier
+  CMD_QUOTA_UPDATE: 'CMD_QUOTA_UPDATE', // Notification de nouveau quota
+  CMD_RELAY_CONTROL: 'CMD_RELAY_CONTROL', // Contrôle d'un relais spécifique
 };
 
 // Simulation: stockage en mémoire des états des boîtiers
@@ -51,10 +53,13 @@ async function initialize() {
  * Envoie une commande de délestage à une zone
  * @param {string} zoneId - Identifiant de la zone
  * @param {string} command - Type de commande (CMD_REDUCE_LOAD, CMD_RESTORE)
- * @param {string} userId - ID de l'utilisateur qui initie la commande
+ * @param {Object} options - Options incluant userId et targetRelays
+ * @param {string} options.userId - ID de l'utilisateur qui initie la commande
+ * @param {Array<string>} options.targetRelays - Relais à cibler (ex: ['POWER', 'LIGHTS_PLUGS']) ou null pour tous
  * @returns {Object} Résultat de l'envoi
  */
-async function sendLoadSheddingCommand(zoneId, command, userId) {
+async function sendLoadSheddingCommand(zoneId, command, options = {}) {
+  const { userId, targetRelays = null } = options;
   const commandId = generateUUID();
   const now = formatDate(new Date());
   
@@ -85,34 +90,65 @@ async function sendLoadSheddingCommand(zoneId, command, userId) {
     const deliveryResults = [];
 
     for (const meter of onlineMeters) {
-      // Simuler une latence réseau
-      await new Promise(resolve => setTimeout(resolve, Math.random() * 50));
-      
-      // Simuler un taux de succès de 98%
-      const success = Math.random() < 0.98;
-      
-      if (success) {
+      // Si targetRelays est spécifié, envoyer des commandes de relais spécifiques
+      if (targetRelays && Array.isArray(targetRelays) && targetRelays.length > 0 && command === MQTT_COMMANDS.CMD_REDUCE_LOAD) {
+        // Récupérer les relais du compteur
+        const relays = await querySQLObjects(
+          `SELECT id, relay_number, circuit_type FROM meter_relays 
+           WHERE meter_id = $1 AND circuit_type = ANY($2)`,
+          [meter.id, targetRelays],
+          ['id', 'relay_number', 'circuit_type']
+        );
+
+        // Envoyer une commande pour chaque relais ciblé
+        for (const relay of relays) {
+          try {
+            await sendRelayControl(meter.id, relay.id, 'disable');
+            console.log(`📡 [MQTT] Relais ${relay.circuit_type} (${relay.relay_number}) désactivé sur compteur ${meter.id}`);
+          } catch (relayError) {
+            console.error(`Erreur contrôle relais ${relay.id}:`, relayError);
+          }
+        }
+
         deliveredCount++;
-        
-        // Mettre à jour l'état simulé du compteur
-        meterStates.set(meter.id, {
-          lastCommand: command,
-          lastCommandTime: new Date(),
-          sheddingActive: command === MQTT_COMMANDS.CMD_REDUCE_LOAD,
-        });
-        
         deliveryResults.push({
           meterId: meter.id,
           status: 'DELIVERED',
+          relaysAffected: relays.length,
+          targetRelays,
           timestamp: new Date().toISOString(),
         });
       } else {
-        deliveryResults.push({
-          meterId: meter.id,
-          status: 'FAILED',
-          error: 'Timeout',
-          timestamp: new Date().toISOString(),
-        });
+        // Commande générale (comportement par défaut)
+        // Simuler une latence réseau
+        await new Promise(resolve => setTimeout(resolve, Math.random() * 50));
+        
+        // Simuler un taux de succès de 98%
+        const success = Math.random() < 0.98;
+        
+        if (success) {
+          deliveredCount++;
+          
+          // Mettre à jour l'état simulé du compteur
+          meterStates.set(meter.id, {
+            lastCommand: command,
+            lastCommandTime: new Date(),
+            sheddingActive: command === MQTT_COMMANDS.CMD_REDUCE_LOAD,
+          });
+          
+          deliveryResults.push({
+            meterId: meter.id,
+            status: 'DELIVERED',
+            timestamp: new Date().toISOString(),
+          });
+        } else {
+          deliveryResults.push({
+            meterId: meter.id,
+            status: 'FAILED',
+            error: 'Timeout',
+            timestamp: new Date().toISOString(),
+          });
+        }
       }
     }
 
@@ -270,6 +306,139 @@ async function handleMeterStatusUpdate(meterId, status) {
   return true;
 }
 
+/**
+ * Envoie une notification de quota au Kit IoT
+ * @param {string} meterId - ID du compteur
+ * @param {Object} quotaData - Données du quota (quotaId, quotaKwh, quotaGnf, transactionId)
+ * @returns {Object} Résultat de l'envoi
+ */
+async function sendQuotaNotification(meterId, quotaData) {
+  const { quotaId, quotaKwh, quotaGnf, transactionId } = quotaData;
+  const now = formatDate(new Date());
+  
+  try {
+    // Vérifier que le compteur est en ligne
+    const meters = await querySQLObjects(
+      `SELECT id, status FROM meters WHERE id = $1`,
+      [meterId],
+      ['id', 'status']
+    );
+
+    if (meters.length === 0) {
+      throw new Error(`Compteur ${meterId} non trouvé`);
+    }
+
+    if (meters[0].status !== 'ONLINE') {
+      console.warn(`⚠️ Compteur ${meterId} hors ligne, notification quota mise en attente`);
+      return { success: false, reason: 'Meter offline' };
+    }
+
+    // Simuler l'envoi MQTT
+    const topic = `sige/meters/${meterId}/quota/update`;
+    const payload = {
+      quotaId,
+      quotaKwh: parseFloat(quotaKwh),
+      quotaGnf: parseFloat(quotaGnf),
+      transactionId,
+      timestamp: now,
+      action: 'QUOTA_ADDED',
+    };
+
+    // En production: mqttClient.publish(topic, JSON.stringify(payload))
+    console.log(`📡 [MQTT Simulé] Notification quota envoyée à ${meterId}:`);
+    console.log(`   Topic: ${topic}`);
+    console.log(`   Payload: ${JSON.stringify(payload, null, 2)}`);
+
+    // Mettre à jour l'état simulé
+    const currentState = meterStates.get(meterId) || {};
+    meterStates.set(meterId, {
+      ...currentState,
+      lastQuotaUpdate: now,
+      currentQuotaKwh: (currentState.currentQuotaKwh || 0) + parseFloat(quotaKwh),
+    });
+
+    return {
+      success: true,
+      meterId,
+      topic,
+      payload,
+      deliveredAt: now,
+    };
+  } catch (error) {
+    console.error('Erreur envoi notification quota:', error);
+    throw error;
+  }
+}
+
+/**
+ * Envoie une commande de contrôle de relais au Kit IoT
+ * @param {string} meterId - ID du compteur
+ * @param {string} relayId - ID du relais
+ * @param {string} action - 'enable' ou 'disable'
+ * @returns {Object} Résultat de l'envoi
+ */
+async function sendRelayControl(meterId, relayId, action) {
+  const now = formatDate(new Date());
+  
+  try {
+    // Vérifier que le compteur est en ligne
+    const meters = await querySQLObjects(
+      `SELECT id, status FROM meters WHERE id = $1`,
+      [meterId],
+      ['id', 'status']
+    );
+
+    if (meters.length === 0) {
+      throw new Error(`Compteur ${meterId} non trouvé`);
+    }
+
+    if (meters[0].status !== 'ONLINE') {
+      console.warn(`⚠️ Compteur ${meterId} hors ligne, commande relais mise en attente`);
+      return { success: false, reason: 'Meter offline' };
+    }
+
+    // Récupérer les infos du relais
+    const relays = await querySQLObjects(
+      `SELECT relay_number, circuit_type, label FROM meter_relays WHERE id = $1 AND meter_id = $2`,
+      [relayId, meterId],
+      ['relay_number', 'circuit_type', 'label']
+    );
+
+    if (relays.length === 0) {
+      throw new Error(`Relais ${relayId} non trouvé pour le compteur ${meterId}`);
+    }
+
+    const relay = relays[0];
+
+    // Simuler l'envoi MQTT
+    const topic = `sige/meters/${meterId}/relays/${relay.relay_number}/control`;
+    const payload = {
+      relayId,
+      relayNumber: parseInt(relay.relay_number),
+      circuitType: relay.circuit_type,
+      action: action.toUpperCase(),
+      timestamp: now,
+    };
+
+    // En production: mqttClient.publish(topic, JSON.stringify(payload))
+    console.log(`📡 [MQTT Simulé] Commande relais envoyée à ${meterId}:`);
+    console.log(`   Topic: ${topic}`);
+    console.log(`   Payload: ${JSON.stringify(payload, null, 2)}`);
+
+    return {
+      success: true,
+      meterId,
+      relayId,
+      topic,
+      payload,
+      deliveredAt: now,
+    };
+  } catch (error) {
+    console.error('Erreur envoi commande relais:', error);
+    throw error;
+  }
+}
+
 // Exporter le service
 const mqttService = {
   initialize,
@@ -278,6 +447,8 @@ const mqttService = {
   getMeterState,
   getCommandHistory,
   handleMeterStatusUpdate,
+  sendQuotaNotification,
+  sendRelayControl,
   COMMANDS: MQTT_COMMANDS,
   CONFIG: MQTT_CONFIG,
 };

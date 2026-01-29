@@ -64,7 +64,7 @@ router.get('/clients', async (req, res) => {
     const { search, zone, limit = 50 } = req.query;
 
     let query = `
-      SELECT u.id, u.nom, u.email, u.telephone, u.role,
+      SELECT u.id, u.nom, u.email, u.role,
              h.id as home_id, h.nom as home_nom, h.ville as zone
       FROM users u
       LEFT JOIN homes h ON h.proprietaire_id = u.id
@@ -74,7 +74,7 @@ router.get('/clients', async (req, res) => {
     let paramIndex = 1;
 
     if (search) {
-      query += ` AND (u.nom ILIKE $${paramIndex} OR u.email ILIKE $${paramIndex} OR u.telephone ILIKE $${paramIndex})`;
+      query += ` AND (u.nom ILIKE $${paramIndex} OR u.email ILIKE $${paramIndex})`;
       params.push(`%${search}%`);
       paramIndex++;
     }
@@ -91,14 +91,14 @@ router.get('/clients', async (req, res) => {
     const clients = await querySQLObjects(
       query,
       params,
-      ['id', 'nom', 'email', 'telephone', 'role', 'home_id', 'home_nom', 'zone']
+      ['id', 'nom', 'email', 'role', 'home_id', 'home_nom', 'zone']
     );
 
     const formatted = clients.map(c => ({
       id: c.id,
       name: c.nom,
       email: c.email,
-      phone: c.telephone,
+      phone: '', // Téléphone non disponible dans le schéma actuel
       zone: c.zone || 'Non assigné',
       homeId: c.home_id,
       homeName: c.home_nom,
@@ -139,16 +139,25 @@ router.post(
 
       if (targetMode === 'zone') {
         // Récupérer tous les utilisateurs des zones sélectionnées
+        // Les targets sont des IDs de zones (ex: "CONAKRY", "DIXINN")
         for (const zoneId of targets) {
+          // Convertir l'ID en nom de zone (ex: "CONAKRY" -> "Conakry")
           const zoneName = zoneId.replace(/-/g, ' ');
+          // Chercher avec le nom exact et aussi avec l'ID
           const users = await querySQLObjects(
-            `SELECT DISTINCT u.id, u.nom, u.email, u.telephone
+            `SELECT DISTINCT u.id, u.nom, u.email, h.ville
              FROM users u
              JOIN homes h ON h.proprietaire_id = u.id
-             WHERE h.ville ILIKE $1 AND u.role = 'CITOYEN'`,
-            [`%${zoneName}%`],
-            ['id', 'nom', 'email', 'telephone']
+             WHERE u.role = 'CITOYEN'
+             AND (
+               h.ville ILIKE $1 
+               OR UPPER(REPLACE(h.ville, ' ', '-')) = $2
+               OR h.ville = $3
+             )`,
+            [`%${zoneName}%`, zoneId.toUpperCase(), zoneName],
+            ['id', 'nom', 'email', 'ville']
           );
+          console.log(`📍 Zone ${zoneId} (${zoneName}): ${users.length} utilisateurs trouvés`);
           recipients.push(...users);
         }
         // Dédupliquer
@@ -195,19 +204,47 @@ router.post(
         ]
       );
 
-      // Si envoi immédiat, notifier via WebSocket
+      // Si envoi immédiat, notifier via WebSocket et créer des notifications
       if (!isScheduled) {
-        // Envoyer la notification à chaque destinataire connecté
+        console.log(`📤 Envoi message ${messageId} à ${recipientCount} destinataires`);
+        
+        // Créer une notification pour chaque destinataire dans la base
         for (const recipient of recipients) {
-          await websocketService.sendToUser(recipient.id, {
-            type: 'broadcast',
-            messageId,
-            title,
-            content,
-            messageType,
-            from: 'EDG',
-            timestamp: new Date().toISOString(),
-          });
+          try {
+            // Envoyer via WebSocket si connecté
+            await websocketService.sendToUser(recipient.id, {
+              type: 'broadcast',
+              messageId,
+              title,
+              content,
+              messageType,
+              from: 'EDG',
+              timestamp: new Date().toISOString(),
+            });
+
+            // Créer aussi une notification dans la base pour persistance
+            const notificationId = generateUUID();
+            await executeSQL(
+              `INSERT INTO state_notifications 
+               (id, title, message, notification_type, recipient_user_id, recipient_role, 
+                priority, data, read, created_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+              [
+                notificationId,
+                title,
+                content,
+                'BROADCAST',
+                recipient.id,
+                'CITOYEN',
+                messageType === 'danger' ? 'HIGH' : messageType === 'warning' ? 'MEDIUM' : 'NORMAL',
+                JSON.stringify({ messageId, messageType, from: 'EDG' }),
+                false,
+                formatDate(new Date())
+              ]
+            );
+          } catch (err) {
+            console.error(`❌ Erreur notification pour ${recipient.id}:`, err.message);
+          }
         }
 
         // Simuler les statistiques de livraison
@@ -216,6 +253,8 @@ router.post(
           `UPDATE broadcast_messages SET delivered_count = $1 WHERE id = $2`,
           [delivered, messageId]
         );
+        
+        console.log(`✅ ${delivered} notifications créées sur ${recipientCount} destinataires`);
       }
 
       res.status(201).json({
@@ -238,6 +277,183 @@ router.post(
     }
   }
 );
+
+/**
+ * GET /api/broadcast/received
+ * Messages reçus par l'utilisateur (pour citoyens)
+ */
+router.get('/received', async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const userRole = req.user.role;
+    const { limit = 50, offset = 0 } = req.query;
+
+    console.log('🔍 Récupération messages pour utilisateur:', userId, 'role:', userRole);
+
+    // Récupérer la ville de l'utilisateur
+    const userHomes = await querySQLObjects(
+      `SELECT DISTINCT h.ville FROM homes h WHERE h.proprietaire_id = $1`,
+      [userId],
+      ['ville']
+    );
+    const userZoneNames = userHomes.map(h => h.ville || '').filter(Boolean);
+    const userZones = userZoneNames.map(zone => zone.toUpperCase().replace(/\s+/g, '-'));
+    
+    // Si l'utilisateur n'a pas de home, on ne peut pas filtrer par zone
+    if (userZoneNames.length === 0) {
+      console.log('⚠️ Utilisateur sans home - ne peut pas recevoir de messages par zone');
+    }
+    
+    console.log('📍 Zones utilisateur:', userZoneNames, 'IDs:', userZones);
+
+    // Récupérer TOUS les messages envoyés récemment (on va filtrer après)
+    const allMessages = await querySQLObjects(
+      `SELECT m.id, m.title, m.content, m.message_type, m.target_mode, m.targets,
+              m.recipients_count, m.delivered_count, m.sent_at, m.created_at,
+              u.id as sender_id, u.nom as sender_nom
+       FROM broadcast_messages m
+       LEFT JOIN users u ON m.sent_by = u.id
+       WHERE m.status = 'SENT'
+       ORDER BY m.created_at DESC
+       LIMIT $1`,
+      [parseInt(limit) * 20], // Récupérer beaucoup plus pour filtrer
+      ['id', 'title', 'content', 'message_type', 'target_mode', 'targets',
+       'recipients_count', 'delivered_count', 'sent_at', 'created_at', 'sender_id', 'sender_nom']
+    );
+
+    console.log(`📨 Messages trouvés en base: ${allMessages.length}`);
+
+    // Filtrer les messages qui concernent cet utilisateur
+    const messages = [];
+    for (const m of allMessages) {
+      if (!m.targets) {
+        console.log(`⚠️ Message ${m.id} - Pas de targets`);
+        continue;
+      }
+      
+      let targets;
+      try {
+        targets = typeof m.targets === 'string' ? JSON.parse(m.targets) : m.targets;
+        if (!Array.isArray(targets)) {
+          console.log(`⚠️ Message ${m.id} - Targets n'est pas un tableau:`, typeof targets);
+          continue;
+        }
+      } catch (e) {
+        console.error(`❌ Erreur parsing targets pour ${m.id}:`, e.message);
+        continue;
+      }
+
+      let shouldInclude = false;
+
+      if (m.target_mode === 'individual') {
+        // Mode individuel: vérifier si l'ID utilisateur est dans les targets
+        shouldInclude = targets.some(t => String(t) === String(userId));
+        if (shouldInclude) {
+          console.log(`✅ Message ${m.id} - Mode individuel - Utilisateur ${userId} trouvé dans targets:`, targets);
+        } else {
+          console.log(`❌ Message ${m.id} - Mode individuel - Utilisateur ${userId} NON trouvé dans targets:`, targets);
+        }
+      } else if (m.target_mode === 'zone') {
+        // Mode zone: vérifier si la zone de l'utilisateur correspond
+        // Les targets sont des IDs de zones (ex: "CONAKRY", "DIXINN")
+        if (userZoneNames.length === 0) {
+          console.log(`❌ Message ${m.id} - Mode zone - Utilisateur sans zone`);
+          shouldInclude = false;
+        } else {
+          shouldInclude = targets.some(target => {
+            const targetStr = String(target).toUpperCase().replace(/\s+/g, '-');
+            const targetName = String(target).replace(/-/g, ' ');
+            
+            // Comparer avec les zones de l'utilisateur (format ID)
+            const matchesId = userZones.some(uz => uz === targetStr);
+            
+            // Comparer aussi avec les noms de zones (format nom) - plusieurs variantes
+            const matchesName = userZoneNames.some(zone => {
+              const zoneId = zone.toUpperCase().replace(/\s+/g, '-');
+              const zoneLower = zone.toLowerCase();
+              const targetLower = targetName.toLowerCase();
+              
+              return zoneId === targetStr || 
+                     zoneLower === targetLower ||
+                     zone === targetName ||
+                     zone === target;
+            });
+            
+            return matchesId || matchesName;
+          });
+          
+          if (shouldInclude) {
+            console.log(`✅ Message ${m.id} - Mode zone - Zone correspond:`, targets, 'vs zones utilisateur:', userZones, userZoneNames);
+          } else {
+            console.log(`❌ Message ${m.id} - Mode zone - Zone ne correspond pas:`, targets, 'vs zones utilisateur:', userZones, userZoneNames);
+          }
+        }
+      } else {
+        console.log(`⚠️ Message ${m.id} - Mode inconnu:`, m.target_mode);
+      }
+      
+      if (shouldInclude) {
+        messages.push(m);
+      }
+    }
+
+    console.log(`📬 Messages filtrés pour cet utilisateur: ${messages.length} sur ${allMessages.length}`);
+
+    // Vérifier aussi les notifications de type broadcast
+    const notifications = await querySQLObjects(
+      `SELECT id, title, message, notification_type, data, read, priority, created_at
+       FROM state_notifications
+       WHERE (recipient_user_id = $1 OR (recipient_user_id IS NULL AND recipient_role = $2))
+       AND (notification_type = 'BROADCAST' OR notification_type = 'MESSAGE')
+       ORDER BY created_at DESC
+       LIMIT $3`,
+      [userId, userRole, parseInt(limit)],
+      ['id', 'title', 'message', 'notification_type', 'data', 'read', 'priority', 'created_at']
+    );
+
+    const formatted = [
+      ...messages.map(m => ({
+        id: m.id,
+        title: m.title,
+        content: m.content,
+        messageType: m.message_type,
+        createdAt: m.created_at,
+        sentAt: m.sent_at,
+        sentBy: m.sender_nom || 'EDG',
+        read: false, // Les messages broadcast ne sont pas marqués comme lus individuellement
+        isNotification: false,
+      })),
+      ...notifications.map(n => ({
+        id: n.id,
+        title: n.title,
+        content: n.message,
+        messageType: n.data ? (JSON.parse(n.data).messageType || 'info') : 'info',
+        createdAt: n.created_at,
+        read: n.read === true,
+        isNotification: true,
+      })),
+    ];
+
+    // Trier par date (plus récents en premier)
+    formatted.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+    const result = formatted.slice(parseInt(offset), parseInt(offset) + parseInt(limit));
+    
+    console.log(`📤 Envoi de ${result.length} messages à l'utilisateur ${userId} (total: ${formatted.length})`);
+
+    res.json({
+      messages: result,
+      pagination: {
+        total: formatted.length,
+        limit: parseInt(limit),
+        offset: parseInt(offset),
+      },
+    });
+  } catch (error) {
+    console.error('Erreur récupération messages reçus:', error);
+    res.status(500).json({ error: 'Erreur lors de la récupération' });
+  }
+});
 
 /**
  * GET /api/broadcast/history

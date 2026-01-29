@@ -4,7 +4,7 @@ Write-Host "🚀 Démarrage des serveurs SIGE-Guinée..." -ForegroundColor Cyan
 
 # Vérifier Docker
 Write-Host "`n📦 Vérification de Docker..." -ForegroundColor Yellow
-$dockerStatus = docker ps 2>&1
+$null = docker ps 2>&1
 if ($LASTEXITCODE -ne 0) {
     Write-Host "❌ Docker n'est pas démarré. Veuillez démarrer Docker Desktop." -ForegroundColor Red
     exit 1
@@ -17,7 +17,7 @@ docker-compose -f docker-compose.dev.yml up -d
 Start-Sleep -Seconds 5
 
 # Vérifier PostgreSQL
-$pgStatus = docker exec sige-postgres pg_isready -U postgres 2>&1
+$null = docker exec sige-postgres pg_isready -U postgres 2>&1
 if ($LASTEXITCODE -eq 0) {
     Write-Host "✅ PostgreSQL est prêt" -ForegroundColor Green
 } else {

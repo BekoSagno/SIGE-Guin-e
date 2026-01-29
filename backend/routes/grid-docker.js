@@ -19,6 +19,7 @@ router.post(
   [
     body('zoneId').trim().notEmpty(),
     body('commandType').isIn(['SHED_HEAVY_LOADS', 'RESTORE']),
+    body('targetRelays').optional().isArray(), // ['POWER', 'LIGHTS_PLUGS'] ou null pour tous
   ],
   async (req, res) => {
     try {
@@ -27,7 +28,7 @@ router.post(
         return res.status(400).json({ errors: errors.array() });
       }
 
-      const { zoneId, commandType } = req.body;
+      const { zoneId, commandType, targetRelays } = req.body;
 
       // Trouver tous les foyers de la zone
       const homes = await querySQLObjects(
@@ -76,18 +77,26 @@ router.post(
         });
       }
 
+      // Si targetRelays est spécifié, désactiver uniquement ces relais
+      // Sinon, comportement par défaut (couper les charges lourdes = relais POWER)
+      const relaysToTarget = targetRelays && Array.isArray(targetRelays) && targetRelays.length > 0
+        ? targetRelays
+        : (commandType === 'SHED_HEAVY_LOADS' ? ['POWER'] : null); // Par défaut, couper seulement POWER
+
       // Envoyer la commande MQTT aux boîtiers IoT
       try {
         const mqttCommand = commandType === 'SHED_HEAVY_LOADS' ? 'CMD_REDUCE_LOAD' : 'CMD_RESTORE';
         const mqttResult = await mqttService.sendLoadSheddingCommand(zoneId, mqttCommand, {
           userId: req.user.id,
+          targetRelays: relaysToTarget, // Relais spécifiques à cibler
         });
         
         res.status(201).json({
-          message: `Délestage ${commandType} déclenché sur la zone ${zoneId}`,
-          event: { id: eventId, zoneId, commandType, metersAffected, startedAt: new Date() },
+          message: `Délestage ${commandType} déclenché sur la zone ${zoneId}${relaysToTarget ? ` (Relais: ${relaysToTarget.join(', ')})` : ''}`,
+          event: { id: eventId, zoneId, commandType, metersAffected, startedAt: new Date(), targetRelays: relaysToTarget },
           metersAffected,
           homesAffected: homes.length,
+          targetRelays: relaysToTarget || 'ALL',
           mqtt: mqttResult,
         });
       } catch (mqttError) {
@@ -250,6 +259,75 @@ router.get('/zone-connectivity/:zoneId', async (req, res) => {
   } catch (error) {
     console.error('Erreur vérification connectivité:', error);
     res.status(500).json({ error: 'Erreur lors de la vérification' });
+  }
+});
+
+/**
+ * GET /api/grid/zones/:zoneId/relays
+ * Récupérer les statistiques des relais pour une zone
+ */
+router.get('/zones/:zoneId/relays', async (req, res) => {
+  try {
+    const { zoneId } = req.params;
+
+    // Récupérer tous les compteurs de la zone
+    const meters = await querySQLObjects(
+      `SELECT m.id, m.status, h.id as home_id
+       FROM meters m
+       JOIN homes h ON m.home_id = h.id
+       WHERE h.ville ILIKE $1`,
+      [`%${zoneId}%`],
+      ['id', 'status', 'home_id']
+    );
+
+    const onlineMeters = meters.filter(m => m.status === 'ONLINE');
+    
+    // Statistiques par type de relais
+    const relayStats = {
+      POWER: { total: 0, enabled: 0, disabled: 0, totalPower: 0 },
+      LIGHTS_PLUGS: { total: 0, enabled: 0, disabled: 0, totalPower: 0 },
+      ESSENTIAL: { total: 0, enabled: 0, disabled: 0, totalPower: 0 },
+    };
+
+    // Pour chaque compteur en ligne, récupérer ses relais
+    for (const meter of onlineMeters) {
+      const relays = await querySQLObjects(
+        `SELECT circuit_type, is_enabled, is_active, current_power, max_power
+         FROM meter_relays
+         WHERE meter_id = $1`,
+        [meter.id],
+        ['circuit_type', 'is_enabled', 'is_active', 'current_power', 'max_power']
+      );
+
+      for (const relay of relays) {
+        const type = relay.circuit_type;
+        if (relayStats[type]) {
+          relayStats[type].total++;
+          if (relay.is_enabled && relay.is_active) {
+            relayStats[type].enabled++;
+          } else {
+            relayStats[type].disabled++;
+          }
+          relayStats[type].totalPower += parseFloat(relay.current_power || 0);
+        }
+      }
+    }
+
+    res.json({
+      zoneId,
+      totalMeters: meters.length,
+      onlineMeters: onlineMeters.length,
+      relayStats,
+      summary: {
+        totalRelays: Object.values(relayStats).reduce((sum, stat) => sum + stat.total, 0),
+        enabledRelays: Object.values(relayStats).reduce((sum, stat) => sum + stat.enabled, 0),
+        disabledRelays: Object.values(relayStats).reduce((sum, stat) => sum + stat.disabled, 0),
+        totalPower: Object.values(relayStats).reduce((sum, stat) => sum + stat.totalPower, 0),
+      },
+    });
+  } catch (error) {
+    console.error('Erreur récupération statistiques relais:', error);
+    res.status(500).json({ error: 'Erreur lors de la récupération des statistiques' });
   }
 });
 

@@ -4,6 +4,7 @@ import { authMiddleware } from '../middleware/authMiddleware.js';
 import { roleMiddleware } from '../middleware/roleMiddleware.js';
 import { querySQLObjects, executeSQL, generateUUID, formatDate } from '../services/sqlService.js';
 import { uploadPhoto, handleUploadError } from '../middleware/uploadMiddleware.js';
+import websocketService from '../services/websocketService.js';
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -260,6 +261,67 @@ router.post(
           ville: i.home_ville,
         } : null,
       };
+
+      // Créer une notification pour l'EDG si l'incident vient d'un citoyen
+      if (req.user.role === 'CITOYEN') {
+        try {
+          const notificationId = generateUUID();
+          const priority = incidentType === 'FRAUDE_SUSPECTEE' ? 'HIGH' : 
+                          incidentType === 'PANNE' || incidentType === 'COUPURE' ? 'NORMAL' : 'LOW';
+          
+          await executeSQL(
+            `INSERT INTO state_notifications 
+             (id, recipient_role, recipient_user_id, notification_type, title, message, data, priority, created_at)
+             VALUES ($1, $2, NULL, $3, $4, $5, $6, $7, $8)`,
+            [
+              notificationId,
+              'AGENT_EDG',
+              'INCIDENT_REPORTED',
+              `Nouvel incident signalé${incidentType ? ` (${incidentType})` : ''}`,
+              `${i.reporter_nom} a signalé : ${description.substring(0, 100)}${description.length > 100 ? '...' : ''}${i.home_ville ? ` - Zone: ${i.home_ville}` : ''}`,
+              JSON.stringify({
+                incidentId: incident.id,
+                reporterId: incident.reporterId,
+                reporterNom: i.reporter_nom,
+                reporterEmail: i.reporter_email,
+                incidentType: incident.incidentType,
+                description: incident.description,
+                homeId: incident.homeId,
+                homeVille: i.home_ville,
+                latitude: incident.latitude,
+                longitude: incident.longitude,
+                createdAt: incident.createdAt,
+              }),
+              priority,
+              incident.createdAt,
+            ]
+          );
+
+          // Envoyer notification via WebSocket à tous les agents EDG connectés
+          websocketService.broadcast({
+            type: 'notification',
+            notification: {
+              id: notificationId,
+              type: 'INCIDENT_REPORTED',
+              title: `Nouvel incident signalé${incidentType ? ` (${incidentType})` : ''}`,
+              message: `${i.reporter_nom} : ${description.substring(0, 80)}...`,
+              data: {
+                incidentId: incident.id,
+                incidentType: incident.incidentType,
+                reporterNom: i.reporter_nom,
+                homeVille: i.home_ville,
+              },
+              priority,
+            },
+            targetRole: 'AGENT_EDG',
+          });
+
+          console.log(`📢 Notification EDG créée pour incident: ${incident.id} (${incidentType || 'AUTRE'})`);
+        } catch (notifError) {
+          console.error('⚠️ Erreur création notification EDG pour incident:', notifError);
+          // Ne pas bloquer la création de l'incident si la notification échoue
+        }
+      }
 
       res.status(201).json({
         message: 'Incident créé avec succès',

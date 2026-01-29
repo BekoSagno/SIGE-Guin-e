@@ -46,13 +46,26 @@ function EnergyTransfer({ currentHomeId, canTransfer = true }) {
 
     try {
       const toHome = homes.find(h => h.id === toHomeId);
-      await transferService.transferEnergy(fromHomeId, toHomeId, parseFloat(amount), unit);
+      const response = await transferService.transferEnergy(fromHomeId, toHomeId, parseFloat(amount), unit);
+      
+      // Calculer le quota en kWh si c'est un transfert en GNF
+      let quotaKwh = null;
+      if (unit === 'GNF') {
+        const tariffPerKwh = 1000; // Taux: 1 kWh = 1000 GNF
+        quotaKwh = parseFloat(amount) / tariffPerKwh;
+      }
+      
       setAmount('');
       setToHomeId('');
       loadHistory();
-      notify.success(`${amount} ${unit} transféré vers ${toHome?.nom || 'le foyer'} avec succès !`, {
+      
+      const message = quotaKwh 
+        ? `${amount} ${unit} (${quotaKwh.toFixed(4)} kWh) transféré vers ${toHome?.nom || 'le foyer'} avec succès ! Le Kit IoT a été notifié.`
+        : `${amount} ${unit} transféré vers ${toHome?.nom || 'le foyer'} avec succès !`;
+      
+      notify.success(message, {
         title: '💸 Transfert effectué',
-        duration: 5000,
+        duration: 6000,
       });
     } catch (error) {
       notify.error(error.response?.data?.error || 'Erreur lors du transfert', {
@@ -97,7 +110,10 @@ function EnergyTransfer({ currentHomeId, canTransfer = true }) {
         </div>
         <div>
           <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100">Transfert d'Énergie</h3>
-          <p className="text-sm text-gray-600 dark:text-gray-400">Partagez de l'énergie ou du crédit entre vos foyers</p>
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            Partagez de l'énergie ou du crédit entre vos foyers. 
+            Le Kit IoT du destinataire sera automatiquement notifié.
+          </p>
         </div>
       </div>
 
@@ -170,9 +186,14 @@ function EnergyTransfer({ currentHomeId, canTransfer = true }) {
               onChange={(e) => setUnit(e.target.value)}
               className="w-full px-4 py-3 border-2 border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-xl focus:border-primary-500 focus:ring-2 focus:ring-primary-200 dark:focus:ring-primary-900 transition-all font-semibold"
             >
-              <option value="GNF">GNF (Franc Guinéen)</option>
-              <option value="Wh">Wh (Watt-heure)</option>
+              <option value="GNF">GNF (Franc Guinéen) - Crée un quota kWh</option>
+              <option value="Wh">Wh (Watt-heure) - Transfert direct</option>
             </select>
+            {unit === 'GNF' && amount && (
+              <p className="text-xs text-primary-600 dark:text-primary-400 mt-1">
+                💡 Quota équivalent: {(parseFloat(amount) / 1000).toFixed(4)} kWh
+              </p>
+            )}
           </div>
         </div>
 

@@ -328,14 +328,25 @@ router.get('/performance-audit', async (req, res) => {
       zoneRanking = await querySQLObjects(
         `SELECT zone_name, efficiency_percent, revenue_collected_gnf, 
                 energy_injected_kwh, energy_recovered_kwh, alert_level,
-                fraud_cases_detected, iot_equipment_count, investigation_required
+                iot_equipment_count, investigation_required
          FROM v_zone_efficiency_ranking
          LIMIT 20`,
         [],
         ['zone_name', 'efficiency_percent', 'revenue_collected_gnf',
          'energy_injected_kwh', 'energy_recovered_kwh', 'alert_level',
-         'fraud_cases_detected', 'iot_equipment_count', 'investigation_required']
+         'iot_equipment_count', 'investigation_required']
       );
+      
+      // Calculer fraud_cases_detected à partir des incidents
+      for (const zone of zoneRanking) {
+        const fraudCount = await countSQL(
+          `SELECT COUNT(*) FROM incidents 
+           WHERE incident_type = 'FRAUDE_SUSPECTEE' 
+           AND home_id IN (SELECT id FROM homes WHERE ville = $1)`,
+          [zone.zone_name]
+        );
+        zone.fraud_cases_detected = fraudCount;
+      }
     } catch (err) {
       console.warn('Vue v_zone_efficiency_ranking non trouvée:', err.message);
       // Données par défaut basées sur les zones existantes

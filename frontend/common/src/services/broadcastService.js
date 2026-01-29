@@ -66,6 +66,17 @@ export const broadcastService = {
     const response = await api.delete(`/broadcast/${messageId}`);
     return response.data;
   },
+
+  /**
+   * Récupère les messages reçus par l'utilisateur (pour citoyens)
+   * @param {Object} params - Paramètres de pagination
+   * @param {number} params.limit - Nombre de messages par page
+   * @param {number} params.offset - Décalage
+   */
+  async getReceivedMessages(params = {}) {
+    const response = await api.get('/broadcast/received', { params });
+    return response.data;
+  },
 };
 
 export default broadcastService;

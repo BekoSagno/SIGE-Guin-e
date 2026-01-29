@@ -8,11 +8,13 @@ import EnergyTransfer from '../components/EnergyTransfer';
 import DeviceAnalytics from '../components/DeviceAnalytics';
 import MeterPairing from '../components/MeterPairing';
 import SmartSave from '../components/SmartSave';
+import SmartPanel from '../components/SmartPanel';
 import EconomyMode from '../components/EconomyMode';
 import DeviceScheduler from '../components/DeviceScheduler';
 import PredictiveMaintenance from '../components/PredictiveMaintenance';
 import IncidentReport from '../components/IncidentReport';
 import DashboardSidebar from '../components/DashboardSidebar';
+import EDGMessages from '../components/EDGMessages';
 import AddHomeModal from '../components/AddHomeModal';
 import ThemeToggle from '../components/ThemeToggle';
 import { useWebSocket } from '../hooks/useWebSocket';
@@ -425,6 +427,14 @@ function Dashboard() {
               />
             )}
 
+            {activeSection === 'smartpanel' && (
+              <SmartPanel 
+                homeId={selectedHome.id} 
+                userRole={userRole} 
+                permissions={permissions} 
+              />
+            )}
+
             {activeSection === 'smartsave' && (
               <SmartSave 
                 homeId={selectedHome.id} 
@@ -471,6 +481,10 @@ function Dashboard() {
                 </div>
               </div>
             ) : null}
+
+            {activeSection === 'edg-messages' && (
+              <EDGMessages />
+            )}
 
             {activeSection === 'incidents' && (
               <IncidentReport 

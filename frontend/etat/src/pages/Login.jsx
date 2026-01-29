@@ -99,7 +99,7 @@ function Login() {
             backgroundSize: '40px 40px'
           }}></div>
         </div>
-      </div>
+        </div>
 
       {/* Carte de connexion - Appliquant la règle d'or (proportion 1:1.618) */}
       <div className="relative z-10 w-full max-w-md animate-fade-in">
@@ -132,8 +132,8 @@ function Login() {
                   </svg>
                 </div>
                 <p className="font-medium">{error}</p>
-              </div>
-            )}
+            </div>
+          )}
 
             {/* Champ Email */}
             <div className="space-y-2">
@@ -142,20 +142,20 @@ function Login() {
                   <span>Email</span>
                   <span className="text-primary-600">*</span>
                 </span>
-              </label>
+            </label>
               <div className="relative group">
                 <div className="absolute inset-0 bg-gradient-to-r from-primary-500 to-primary-600 rounded-xl opacity-0 group-hover:opacity-20 blur transition-opacity duration-300"></div>
-                <input
-                  id="email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
+            <input
+              id="email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
                   className="relative w-full px-5 py-3.5 bg-gray-50 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all duration-300 placeholder-gray-400 text-gray-900 font-medium hover:border-primary-300 hover:bg-white"
-                  placeholder="admin@energie.gn"
-                />
+              placeholder="admin@energie.gn"
+            />
               </div>
-            </div>
+          </div>
 
             {/* Champ Mot de passe */}
             <div className="space-y-2">
@@ -164,27 +164,27 @@ function Login() {
                   <span>Mot de passe</span>
                   <span className="text-primary-600">*</span>
                 </span>
-              </label>
+            </label>
               <div className="relative group">
                 <div className="absolute inset-0 bg-gradient-to-r from-primary-500 to-primary-600 rounded-xl opacity-0 group-hover:opacity-20 blur transition-opacity duration-300"></div>
-                <input
-                  id="password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
+            <input
+              id="password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
                   className="relative w-full px-5 py-3.5 bg-gray-50 border-2 border-gray-200 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all duration-300 placeholder-gray-400 text-gray-900 font-medium hover:border-primary-300 hover:bg-white"
-                  placeholder="••••••••"
-                />
+              placeholder="••••••••"
+            />
               </div>
-            </div>
+          </div>
 
             {/* Bouton de connexion avec effet premium */}
-            <button
-              type="submit"
+          <button
+            type="submit"
               disabled={loading || !email || !password}
               className="relative w-full group overflow-hidden bg-gradient-to-r from-primary-600 via-primary-700 to-primary-600 text-white font-bold py-4 px-6 rounded-xl shadow-lg hover:shadow-2xl transform hover:scale-[1.02] active:scale-[0.98] transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:hover:shadow-lg"
-            >
+          >
               {/* Effet de brillance animé */}
               <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000"></div>
               
@@ -205,8 +205,8 @@ function Login() {
                   </>
                 )}
               </span>
-            </button>
-          </form>
+          </button>
+        </form>
 
           {/* Informations de test */}
           <div className="mt-8 pt-6 border-t border-gray-200 animate-fade-in" style={{ animationDelay: '0.2s' }}>

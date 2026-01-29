@@ -17,12 +17,21 @@ export async function querySQL(sql, params = []) {
   try {
     // Échapper les paramètres pour la sécurité
     let safeSql = sql;
-    params.forEach((param, index) => {
-      const escaped = typeof param === 'string' 
-        ? param.replace(/'/g, "''").replace(/"/g, '\\"') 
-        : param;
-      safeSql = safeSql.replace(`$${index + 1}`, `'${escaped}'`);
-    });
+    
+    // Remplacer les paramètres en ordre décroissant pour éviter les conflits avec les $ dans les chaînes
+    for (let i = params.length - 1; i >= 0; i--) {
+      const param = params[i];
+      const placeholder = `$${i + 1}`;
+      
+      if (param === null || param === undefined) {
+        safeSql = safeSql.replace(placeholder, 'NULL');
+      } else if (typeof param === 'string') {
+        const escaped = param.replace(/'/g, "''").replace(/"/g, '\\"');
+        safeSql = safeSql.replace(placeholder, `'${escaped}'`);
+      } else {
+        safeSql = safeSql.replace(placeholder, param);
+      }
+    }
     
     // Supprimer les sauts de ligne et espaces multiples pour la commande shell
     safeSql = safeSql.replace(/\s+/g, ' ').trim();
@@ -74,12 +83,23 @@ export async function querySQLObjects(sql, params = [], columns = []) {
 export async function executeSQL(sql, params = []) {
   try {
     let safeSql = sql;
-    params.forEach((param, index) => {
-      const escaped = typeof param === 'string' 
-        ? param.replace(/'/g, "''").replace(/"/g, '\\"') 
-        : param;
-      safeSql = safeSql.replace(`$${index + 1}`, `'${escaped}'`);
-    });
+    
+    // Remplacer les paramètres en ordre décroissant pour éviter les conflits avec les $ dans les chaînes
+    // (ex: hash bcrypt contient $2a$10$... qui pourrait être confondu avec $2, $10, etc.)
+    for (let i = params.length - 1; i >= 0; i--) {
+      const param = params[i];
+      const placeholder = `$${i + 1}`;
+      
+      if (param === null || param === undefined) {
+        safeSql = safeSql.replace(placeholder, 'NULL');
+      } else if (typeof param === 'string') {
+        // Échapper les guillemets simples et doubles
+        const escaped = param.replace(/'/g, "''").replace(/"/g, '\\"');
+        safeSql = safeSql.replace(placeholder, `'${escaped}'`);
+      } else {
+        safeSql = safeSql.replace(placeholder, param);
+      }
+    }
     
     // Supprimer les sauts de ligne et espaces multiples pour la commande shell
     safeSql = safeSql.replace(/\s+/g, ' ').trim();
@@ -108,12 +128,21 @@ export async function executeSQL(sql, params = []) {
 export async function insertSQL(sql, params = [], columns = []) {
   try {
     let safeSql = sql;
-    params.forEach((param, index) => {
-      const escaped = typeof param === 'string' 
-        ? param.replace(/'/g, "''").replace(/"/g, '\\"') 
-        : param;
-      safeSql = safeSql.replace(`$${index + 1}`, `'${escaped}'`);
-    });
+    
+    // Remplacer les paramètres en ordre décroissant pour éviter les conflits avec les $ dans les chaînes
+    for (let i = params.length - 1; i >= 0; i--) {
+      const param = params[i];
+      const placeholder = `$${i + 1}`;
+      
+      if (param === null || param === undefined) {
+        safeSql = safeSql.replace(placeholder, 'NULL');
+      } else if (typeof param === 'string') {
+        const escaped = param.replace(/'/g, "''").replace(/"/g, '\\"');
+        safeSql = safeSql.replace(placeholder, `'${escaped}'`);
+      } else {
+        safeSql = safeSql.replace(placeholder, param);
+      }
+    }
     
     const command = `docker exec sige-postgres psql -U postgres -d sige_guinee -t -A -F "|" -c "${safeSql}"`;
     const { stdout } = await execAsync(command);

@@ -3,6 +3,7 @@ import { body, validationResult } from 'express-validator';
 import { authMiddleware } from '../middleware/authMiddleware.js';
 import { querySQLObjects, executeSQL, insertSQL, generateUUID, formatDate } from '../services/sqlService.js';
 import { detectFraud } from '../services/fraudDetection.js';
+import mqttService from '../services/mqttService.js';
 
 const router = express.Router();
 
@@ -1084,6 +1085,259 @@ router.post('/devices/:deviceId/control', [
   } catch (error) {
     console.error('Erreur contrôle appareil:', error);
     res.status(500).json({ error: 'Erreur lors du contrôle de l\'appareil' });
+  }
+});
+
+/**
+ * GET /api/energy/meters/:meterId/relays
+ * Récupérer tous les relais d'un compteur IoT (Smart Panel)
+ */
+router.get('/meters/:meterId/relays', authMiddleware, async (req, res) => {
+  try {
+    const { meterId } = req.params;
+    const userId = req.user.id;
+
+    // Vérifier l'accès au compteur via le foyer
+    const meters = await querySQLObjects(
+      `SELECT m.id, m.home_id, h.proprietaire_id
+       FROM meters m
+       JOIN homes h ON m.home_id = h.id
+       WHERE m.id = '${meterId}' 
+       AND (h.proprietaire_id = '${userId}' 
+            OR h.id IN (SELECT home_id FROM home_members WHERE user_id = '${userId}'))`,
+      [],
+      ['id', 'home_id', 'proprietaire_id']
+    );
+
+    if (meters.length === 0) {
+      return res.status(403).json({ error: 'Accès non autorisé à ce compteur' });
+    }
+
+    // Récupérer les relais
+    const relays = await querySQLObjects(
+      `SELECT id, meter_id, relay_number, circuit_type, label, is_active, is_enabled, 
+              current_power, max_power, created_at, updated_at
+       FROM meter_relays
+       WHERE meter_id = '${meterId}'
+       ORDER BY relay_number ASC`,
+      [],
+      ['id', 'meter_id', 'relay_number', 'circuit_type', 'label', 'is_active', 'is_enabled', 
+       'current_power', 'max_power', 'created_at', 'updated_at']
+    );
+
+    // Pour chaque relais, compter les appareils connectés
+    const relaysWithDevices = await Promise.all(
+      relays.map(async (relay) => {
+        const devices = await querySQLObjects(
+          `SELECT COUNT(*) as count FROM nilm_signatures WHERE relay_id = '${relay.id}' AND is_active = true`,
+          [],
+          ['count']
+        );
+        return {
+          ...relay,
+          deviceCount: parseInt(devices[0]?.count || 0),
+          currentPower: parseFloat(relay.current_power) || 0,
+          maxPower: relay.max_power ? parseFloat(relay.max_power) : null,
+        };
+      })
+    );
+
+    res.json({ relays: relaysWithDevices });
+  } catch (error) {
+    console.error('Erreur récupération relais:', error);
+    res.status(500).json({ error: 'Erreur lors de la récupération des relais' });
+  }
+});
+
+/**
+ * POST /api/energy/meters/:meterId/relays/:relayId/control
+ * Contrôler un relais (activer/désactiver)
+ */
+router.post('/meters/:meterId/relays/:relayId/control', [
+  body('action').isIn(['enable', 'disable']),
+], authMiddleware, async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { meterId, relayId } = req.params;
+    const { action } = req.body;
+    const userId = req.user.id;
+
+    // Vérifier l'accès
+    const meters = await querySQLObjects(
+      `SELECT m.id FROM meters m
+       JOIN homes h ON m.home_id = h.id
+       WHERE m.id = '${meterId}' 
+       AND (h.proprietaire_id = '${userId}' 
+            OR h.id IN (SELECT home_id FROM home_members WHERE user_id = '${userId}' AND role = 'ADMIN'))`,
+      [],
+      ['id']
+    );
+
+    if (meters.length === 0) {
+      return res.status(403).json({ error: 'Accès non autorisé' });
+    }
+
+    const newState = action === 'enable';
+    const now = new Date().toISOString();
+
+    await executeSQL(
+      `UPDATE meter_relays 
+       SET is_enabled = ${newState}, updated_at = '${now}'
+       WHERE id = '${relayId}' AND meter_id = '${meterId}'`,
+      []
+    );
+
+    // Envoyer commande MQTT au Kit IoT
+    try {
+      await mqttService.sendRelayControl(meterId, relayId, action);
+    } catch (mqttError) {
+      console.error('⚠️ Erreur envoi commande MQTT (non bloquant):', mqttError);
+      // Ne pas bloquer l'opération si MQTT échoue
+    }
+
+    res.json({
+      message: `Relais ${newState ? 'activé' : 'désactivé'} avec succès`,
+      relayId,
+      action,
+    });
+  } catch (error) {
+    console.error('Erreur contrôle relais:', error);
+    res.status(500).json({ error: 'Erreur lors du contrôle du relais' });
+  }
+});
+
+/**
+ * GET /api/energy/meters/:meterId/check-quota
+ * Vérifier le quota disponible pour un compteur (appelé par le Kit IoT)
+ */
+router.get('/meters/:meterId/check-quota', async (req, res) => {
+  try {
+    const { meterId } = req.params;
+    const { requiredKwh } = req.query; // kWh requis pour la consommation actuelle
+
+    // Récupérer le quota actif le plus récent
+    const quotas = await querySQLObjects(
+      `SELECT id, quota_kwh, consumed_kwh, quota_gnf, expires_at, last_sync
+       FROM energy_quotas
+       WHERE meter_id = '${meterId}' 
+       AND is_active = true
+       AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [],
+      ['id', 'quota_kwh', 'consumed_kwh', 'quota_gnf', 'expires_at', 'last_sync']
+    );
+
+    if (quotas.length === 0) {
+      return res.json({
+        hasQuota: false,
+        availableKwh: 0,
+        message: 'Aucun quota disponible',
+      });
+    }
+
+    const quota = quotas[0];
+    const availableKwh = parseFloat(quota.quota_kwh) - parseFloat(quota.consumed_kwh || 0);
+    const required = parseFloat(requiredKwh) || 0;
+
+    // Mettre à jour last_sync
+    const now = new Date().toISOString();
+    await executeSQL(
+      `UPDATE energy_quotas SET last_sync = '${now}' WHERE id = '${quota.id}'`,
+      []
+    );
+
+    res.json({
+      hasQuota: true,
+      availableKwh: Math.max(0, availableKwh),
+      totalQuotaKwh: parseFloat(quota.quota_kwh),
+      consumedKwh: parseFloat(quota.consumed_kwh || 0),
+      quotaGnf: parseFloat(quota.quota_gnf),
+      canConsume: availableKwh >= required,
+      expiresAt: quota.expires_at,
+      lastSync: now,
+    });
+  } catch (error) {
+    console.error('Erreur vérification quota:', error);
+    res.status(500).json({ error: 'Erreur lors de la vérification du quota' });
+  }
+});
+
+/**
+ * POST /api/energy/meters/:meterId/consume-quota
+ * Enregistrer la consommation d'énergie (appelé par le Kit IoT après consommation)
+ */
+router.post('/meters/:meterId/consume-quota', [
+  body('kwh').isFloat({ min: 0 }),
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { meterId } = req.params;
+    const { kwh } = req.body;
+
+    // Récupérer le quota actif
+    const quotas = await querySQLObjects(
+      `SELECT id, quota_kwh, consumed_kwh FROM energy_quotas
+       WHERE meter_id = '${meterId}' 
+       AND is_active = true
+       AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [],
+      ['id', 'quota_kwh', 'consumed_kwh']
+    );
+
+    if (quotas.length === 0) {
+      return res.status(400).json({ error: 'Aucun quota actif disponible' });
+    }
+
+    const quota = quotas[0];
+    const currentConsumed = parseFloat(quota.consumed_kwh || 0);
+    const newConsumed = currentConsumed + parseFloat(kwh);
+    const totalQuota = parseFloat(quota.quota_kwh);
+
+    // Vérifier que la consommation ne dépasse pas le quota
+    if (newConsumed > totalQuota) {
+      return res.status(400).json({ 
+        error: 'Quota insuffisant',
+        availableKwh: Math.max(0, totalQuota - currentConsumed),
+      });
+    }
+
+    // Mettre à jour la consommation
+    const now = new Date().toISOString();
+    await executeSQL(
+      `UPDATE energy_quotas 
+       SET consumed_kwh = ${newConsumed}, last_sync = '${now}', updated_at = '${now}'
+       WHERE id = '${quota.id}'`,
+      []
+    );
+
+    // Si le quota est épuisé, désactiver
+    if (newConsumed >= totalQuota) {
+      await executeSQL(
+        `UPDATE energy_quotas SET is_active = false WHERE id = '${quota.id}'`,
+        []
+      );
+    }
+
+    res.json({
+      message: 'Consommation enregistrée',
+      consumedKwh: newConsumed,
+      availableKwh: Math.max(0, totalQuota - newConsumed),
+      quotaExhausted: newConsumed >= totalQuota,
+    });
+  } catch (error) {
+    console.error('Erreur enregistrement consommation:', error);
+    res.status(500).json({ error: 'Erreur lors de l\'enregistrement de la consommation' });
   }
 });
 

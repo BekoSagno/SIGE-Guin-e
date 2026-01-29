@@ -74,7 +74,7 @@ Write-Host ""
 
 # ==================== VÉRIFICATION DOCKER ====================
 Write-Host "🐳 Docker & PostgreSQL" -ForegroundColor Yellow
-$dockerStatus = docker ps 2>&1
+$null = docker ps 2>&1
 if ($LASTEXITCODE -eq 0) {
     Write-Host "  ✅ Docker est actif" -ForegroundColor Green
     
@@ -84,7 +84,7 @@ if ($LASTEXITCODE -eq 0) {
         Write-Host "  ✅ Conteneur PostgreSQL est en cours d'exécution" -ForegroundColor Green
         
         # Tester la connexion
-        $pgReady = docker exec sige-postgres pg_isready -U postgres 2>&1
+        $null = docker exec sige-postgres pg_isready -U postgres 2>&1
         if ($LASTEXITCODE -eq 0) {
             Write-Host "  ✅ PostgreSQL est prêt à accepter les connexions" -ForegroundColor Green
         } else {
@@ -120,8 +120,8 @@ if ($warnings.Count -gt 0) {
 if ($errors.Count -gt 0) {
     Write-Host ""
     Write-Host "❌ Erreurs:" -ForegroundColor Red
-    foreach ($error in $errors) {
-        Write-Host $error -ForegroundColor Red
+    foreach ($err in $errors) {
+        Write-Host $err -ForegroundColor Red
     }
     Write-Host ""
     Write-Host "💡 Corrigez ces erreurs avant de continuer." -ForegroundColor Cyan

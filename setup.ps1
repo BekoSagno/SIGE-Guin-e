@@ -171,7 +171,7 @@ Write-Host ""
 
 # Vérifier Docker
 Write-Host "  📦 Vérification de Docker..." -ForegroundColor Cyan
-$dockerStatus = docker ps 2>&1
+$null = docker ps 2>&1
 if ($LASTEXITCODE -ne 0) {
     Write-Host "  ⚠️  Docker n'est pas démarré. Démarrez Docker Desktop et réessayez." -ForegroundColor Yellow
     Write-Host "  💡 Vous pouvez démarrer PostgreSQL plus tard avec: docker-compose -f docker-compose.dev.yml up -d" -ForegroundColor Cyan
@@ -184,7 +184,7 @@ if ($LASTEXITCODE -ne 0) {
     Start-Sleep -Seconds 5
     
     # Vérifier PostgreSQL
-    $pgStatus = docker exec sige-postgres pg_isready -U postgres 2>&1
+    $null = docker exec sige-postgres pg_isready -U postgres 2>&1
     if ($LASTEXITCODE -eq 0) {
         Write-Host "  ✅ PostgreSQL est prêt" -ForegroundColor Green
         

@@ -84,6 +84,17 @@ export const personnelService = {
   },
 
   /**
+   * Récupère les nouveaux utilisateurs citoyens inscrits
+   * @param {Object} params - Paramètres de filtrage
+   * @param {number} params.limit - Nombre max de résultats (défaut: 50)
+   * @param {number} params.days - Nombre de jours à remonter (défaut: 7)
+   */
+  async getNewUsers(params = {}) {
+    const response = await api.get('/personnel/new-users', { params });
+    return response.data;
+  },
+
+  /**
    * Récupère les logs d'audit (ADMIN_SYSTEME uniquement)
    * @param {Object} params - Paramètres de pagination et filtrage
    */

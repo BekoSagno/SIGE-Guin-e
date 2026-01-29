@@ -1,11 +1,13 @@
-import { Home, Users, ArrowRight, Zap, Activity, AlertTriangle, Wrench, Snowflake, ChevronUp, ChevronDown, Battery, Clock, Menu, X } from 'lucide-react';
+import { Home, Users, ArrowRight, Zap, Activity, AlertTriangle, Wrench, Snowflake, ChevronUp, ChevronDown, Battery, Clock, Menu, X, MessageSquare, Settings } from 'lucide-react';
 import { useState, useEffect } from 'react';
 
 const menuItems = [
   { id: 'overview', label: 'Vue d\'ensemble', icon: Home, color: 'primary' },
+  { id: 'edg-messages', label: 'Messages EDG', icon: MessageSquare, color: 'success', badge: 'messages' },
   { id: 'family', label: 'Gestion Familiale', icon: Users, color: 'primary' },
   { id: 'transfer', label: 'Transfert d\'Énergie', icon: ArrowRight, color: 'accent' },
   { id: 'pairing', label: 'Appairage IoT', icon: Zap, color: 'success' },
+  { id: 'smartpanel', label: 'Smart Panel', icon: Settings, color: 'primary' },
   { id: 'smartsave', label: 'Smart Save', icon: Snowflake, color: 'success' },
   { id: 'scheduler', label: 'Programmation', icon: Clock, color: 'primary' },
   { id: 'economymode', label: 'Mode Économie', icon: Battery, color: 'success' },

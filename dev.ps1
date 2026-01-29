@@ -107,7 +107,7 @@ switch ($Action.ToLower()) {
         Write-Host ""
         
         # Vérifier Docker
-        $dockerStatus = docker ps 2>&1
+        $null = docker ps 2>&1
         if ($LASTEXITCODE -ne 0) {
             Write-Host "⚠️  Docker n'est pas démarré. Démarrez Docker Desktop d'abord." -ForegroundColor Yellow
         } else {
@@ -157,7 +157,7 @@ switch ($Action.ToLower()) {
         Write-Host ""
         
         # Vérifier Docker
-        $dockerStatus = docker ps 2>&1
+        $null = docker ps 2>&1
         if ($LASTEXITCODE -ne 0) {
             Write-Host "⚠️  Docker n'est pas démarré. Démarrez Docker Desktop d'abord." -ForegroundColor Yellow
             Write-Host ""
@@ -167,7 +167,7 @@ switch ($Action.ToLower()) {
             docker-compose -f docker-compose.dev.yml up -d
             Start-Sleep -Seconds 5
             
-            $pgReady = docker exec sige-postgres pg_isready -U postgres 2>&1
+            $null = docker exec sige-postgres pg_isready -U postgres 2>&1
             if ($LASTEXITCODE -eq 0) {
                 Write-Host "  ✅ PostgreSQL est prêt" -ForegroundColor Green
             } else {

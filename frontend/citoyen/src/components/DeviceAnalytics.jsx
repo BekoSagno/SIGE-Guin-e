@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { apiClient, energyService } from '@common/services';
-import { Activity, TrendingUp, AlertTriangle, DollarSign } from 'lucide-react';
+import { Activity, TrendingUp, AlertTriangle, DollarSign, Zap } from 'lucide-react';
 import {
   LineChart,
   Line,
@@ -39,12 +39,27 @@ function DeviceAnalytics({ homeId, userRole = 'ADMIN', permissions = null }) {
       if (home.meters && home.meters.length > 0) {
         const meterId = home.meters[0].id;
         
-        // Récupérer les signatures NILM
-        const nilmResponse = await apiClient.get(`/energy/history?meterId=${meterId}&limit=100`);
+        // Récupérer les appareils (NILM + DeviceInventory)
+        const devicesResponse = await apiClient.get(`/energy/devices?homeId=${homeId}`);
+        const devicesData = devicesResponse.data.devices || [];
         
-        // Simuler les appareils détectés (dans un vrai système, cela viendrait d'une API dédiée)
-        const activeDevices = home.meters[0].nilmSignatures || [];
-        setDevices(activeDevices);
+        // Récupérer les relais pour enrichir les appareils
+        try {
+          const relaysResponse = await apiClient.get(`/energy/meters/${meterId}/relays`);
+          const relays = relaysResponse.data.relays || [];
+          const relaysMap = new Map(relays.map(r => [r.id, r]));
+          
+          // Enrichir les appareils avec les infos de relais
+          const enrichedDevices = devicesData.map(device => ({
+            ...device,
+            relay: device.relayId ? relaysMap.get(device.relayId) : null,
+          }));
+          
+          setDevices(enrichedDevices);
+        } catch (relayError) {
+          console.warn('Erreur chargement relais (non bloquant):', relayError);
+          setDevices(devicesData);
+        }
       }
     } catch (error) {
       console.error('Erreur chargement appareils:', error);
@@ -214,6 +229,12 @@ function DeviceAnalytics({ homeId, userRole = 'ADMIN', permissions = null }) {
                           {device.deviceName}
                         </h4>
                         <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{device.deviceType}</p>
+                        {device.relay && (
+                          <p className="text-xs text-primary-600 dark:text-primary-400 mt-0.5 flex items-center gap-1">
+                            <Zap className="w-3 h-3" />
+                            Circuit: {device.relay.label || device.relay.circuitType}
+                          </p>
+                        )}
                       </div>
                     </div>
                     {device.isActive && (
