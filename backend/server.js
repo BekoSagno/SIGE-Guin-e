@@ -27,6 +27,7 @@ import sigeIdRoutes from './routes/sige-id-docker.js'; // Système ID SIGE
 import taskReportsRoutes from './routes/task-reports-docker.js'; // Rapports de tâches
 import notificationsRoutes from './routes/notifications-docker.js'; // Notifications temps réel
 import etatEdgMessagesRoutes from './routes/etat-edg-messages-docker.js'; // Messagerie ÉTAT-EDG
+import billsRoutes from './routes/bills-docker.js'; // Factures EDG et Paiements
 
 dotenv.config();
 
@@ -205,6 +206,7 @@ app.use('/api/task-reports', taskReportsRoutes);
 app.use('/api/sige-id', sigeIdRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/etat-edg-messages', etatEdgMessagesRoutes);
+app.use('/api/bills', billsRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {

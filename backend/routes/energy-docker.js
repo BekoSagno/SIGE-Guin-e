@@ -1125,7 +1125,7 @@ router.get('/meters/:meterId/relays', authMiddleware, async (req, res) => {
        'current_power', 'max_power', 'created_at', 'updated_at']
     );
 
-    // Pour chaque relais, compter les appareils connectés
+    // Pour chaque relais, compter les appareils connectés et convertir en camelCase
     const relaysWithDevices = await Promise.all(
       relays.map(async (relay) => {
         const devices = await querySQLObjects(
@@ -1134,10 +1134,18 @@ router.get('/meters/:meterId/relays', authMiddleware, async (req, res) => {
           ['count']
         );
         return {
-          ...relay,
-          deviceCount: parseInt(devices[0]?.count || 0),
+          id: relay.id,
+          meterId: relay.meter_id,
+          relayNumber: relay.relay_number,
+          circuitType: relay.circuit_type,
+          label: relay.label,
+          isActive: relay.is_active,
+          isEnabled: relay.is_enabled,
           currentPower: parseFloat(relay.current_power) || 0,
           maxPower: relay.max_power ? parseFloat(relay.max_power) : null,
+          deviceCount: parseInt(devices[0]?.count || 0),
+          createdAt: relay.created_at,
+          updatedAt: relay.updated_at,
         };
       })
     );
@@ -1184,12 +1192,84 @@ router.post('/meters/:meterId/relays/:relayId/control', [
     const newState = action === 'enable';
     const now = new Date().toISOString();
 
-    await executeSQL(
-      `UPDATE meter_relays 
-       SET is_enabled = ${newState}, updated_at = '${now}'
-       WHERE id = '${relayId}' AND meter_id = '${meterId}'`,
-      []
+    console.log(`🔄 Mise à jour relais ${relayId}: is_enabled = ${newState}, action = ${action}`);
+    console.log(`📋 Paramètres: relayId=${relayId}, meterId=${meterId}, newState=${newState}`);
+
+    // Vérifier d'abord si le relais existe et son état actuel
+    const existingRelay = await querySQLObjects(
+      `SELECT id, is_enabled FROM meter_relays WHERE id = $1 AND meter_id = $2`,
+      [relayId, meterId],
+      ['id', 'is_enabled']
     );
+
+    if (existingRelay.length === 0) {
+      console.error(`❌ Relais ${relayId} non trouvé pour le compteur ${meterId}`);
+      return res.status(404).json({ error: 'Relais non trouvé' });
+    }
+
+    const currentState = existingRelay[0].is_enabled;
+    console.log(`📊 État actuel du relais: is_enabled = ${currentState}`);
+
+    if (currentState === newState) {
+      console.log(`ℹ️ Relais déjà dans l'état demandé (${newState})`);
+      // Ne pas retourner d'erreur, juste continuer pour retourner le relais
+    }
+
+    // Utiliser des paramètres pour tout
+    const updateResult = await executeSQL(
+      `UPDATE meter_relays 
+       SET is_enabled = $1, updated_at = $2
+       WHERE id = $3 AND meter_id = $4`,
+      [newState, now, relayId, meterId]
+    );
+
+    console.log(`✅ UPDATE exécuté: ${updateResult.rowCount} ligne(s) affectée(s)`);
+
+    if (updateResult.rowCount === 0 && currentState !== newState) {
+      console.warn(`⚠️ Aucune ligne mise à jour pour le relais ${relayId} (état actuel: ${currentState}, état demandé: ${newState})`);
+      return res.status(404).json({ error: 'Impossible de mettre à jour le relais' });
+    }
+
+    // Récupérer le relais mis à jour pour le retourner
+    const updatedRelay = await querySQLObjects(
+      `SELECT id, meter_id, relay_number, circuit_type, label, is_active, is_enabled, 
+              current_power, max_power, created_at, updated_at
+       FROM meter_relays
+       WHERE id = $1 AND meter_id = $2`,
+      [relayId, meterId],
+      ['id', 'meter_id', 'relay_number', 'circuit_type', 'label', 'is_active', 'is_enabled', 
+       'current_power', 'max_power', 'created_at', 'updated_at']
+    );
+
+    if (updatedRelay.length === 0) {
+      console.error(`❌ Relais ${relayId} non trouvé après mise à jour`);
+      return res.status(404).json({ error: 'Relais non trouvé après mise à jour' });
+    }
+
+    console.log(`📊 Relais récupéré: is_enabled = ${updatedRelay[0].is_enabled}`);
+
+    // Compter les appareils connectés
+    const devices = await querySQLObjects(
+      `SELECT COUNT(*) as count FROM nilm_signatures WHERE relay_id = '${relayId}' AND is_active = true`,
+      [],
+      ['count']
+    );
+
+    const relayData = updatedRelay[0];
+    const relayResponse = {
+      id: relayData.id,
+      meterId: relayData.meter_id,
+      relayNumber: relayData.relay_number,
+      circuitType: relayData.circuit_type,
+      label: relayData.label,
+      isActive: relayData.is_active,
+      isEnabled: relayData.is_enabled,
+      currentPower: parseFloat(relayData.current_power) || 0,
+      maxPower: relayData.max_power ? parseFloat(relayData.max_power) : null,
+      deviceCount: parseInt(devices[0]?.count || 0),
+      createdAt: relayData.created_at,
+      updatedAt: relayData.updated_at,
+    };
 
     // Envoyer commande MQTT au Kit IoT
     try {
@@ -1203,6 +1283,7 @@ router.post('/meters/:meterId/relays/:relayId/control', [
       message: `Relais ${newState ? 'activé' : 'désactivé'} avec succès`,
       relayId,
       action,
+      relay: relayResponse, // Retourner le relais mis à jour
     });
   } catch (error) {
     console.error('Erreur contrôle relais:', error);

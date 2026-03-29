@@ -1,4 +1,4 @@
-import { Home, Users, ArrowRight, Zap, Activity, AlertTriangle, Wrench, Snowflake, ChevronUp, ChevronDown, Battery, Clock, Menu, X, MessageSquare, Settings } from 'lucide-react';
+import { Home, Users, ArrowRight, Zap, Activity, AlertTriangle, Wrench, Snowflake, ChevronUp, ChevronDown, Battery, Clock, Menu, X, MessageSquare, Settings, FileText } from 'lucide-react';
 import { useState, useEffect } from 'react';
 
 const menuItems = [

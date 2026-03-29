@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { authService, homesService, energyService } from '@common/services';
 import { useNavigate } from 'react-router-dom';
-import { LogOut, Zap, Battery, Activity, AlertTriangle, X, Shield, Lock } from 'lucide-react';
+import { LogOut, Zap, Battery, Activity, AlertTriangle, X, Shield, Lock, Home, Plus } from 'lucide-react';
 import HomeSwitcher from '../components/HomeSwitcher';
 import FamilyManagement from '../components/FamilyManagement';
 import EnergyTransfer from '../components/EnergyTransfer';
@@ -183,6 +183,16 @@ function Dashboard() {
                   />
                 </div>
               )}
+              
+              {/* Bouton Ajouter un Foyer - toujours visible */}
+              <button
+                onClick={() => setShowAddHomeModal(true)}
+                className="flex items-center space-x-1 sm:space-x-2 px-2 sm:px-3 lg:px-4 py-2 bg-primary-500 hover:bg-primary-600 text-white rounded-lg transition-all duration-200 hover:scale-105 shadow-md hover:shadow-lg"
+                title="Ajouter un foyer"
+              >
+                <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
+                <span className="hidden sm:inline font-medium text-sm">Ajouter Foyer</span>
+              </button>
               
               {/* Theme toggle - toujours visible */}
               <ThemeToggle />

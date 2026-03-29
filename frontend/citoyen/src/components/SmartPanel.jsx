@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { apiClient } from '@common/services';
-import { Zap, Power, Lightbulb, Settings, AlertCircle, CheckCircle } from 'lucide-react';
+import { Zap, Power, Lightbulb, Settings, AlertCircle, CheckCircle, Info } from 'lucide-react';
 import { useNotification } from './Notification';
 
 function SmartPanel({ homeId, userRole = 'ADMIN', permissions = null }) {
@@ -46,20 +46,55 @@ function SmartPanel({ homeId, userRole = 'ADMIN', permissions = null }) {
   const handleRelayControl = async (relayId, action) => {
     if (!meterId) return;
 
+    // Mise à jour optimiste de l'état local
+    const newEnabledState = action === 'enable';
+    setRelays(prevRelays => 
+      prevRelays.map(relay => 
+        relay.id === relayId 
+          ? { ...relay, isEnabled: newEnabledState }
+          : relay
+      )
+    );
+
     try {
-      await apiClient.post(`/energy/meters/${meterId}/relays/${relayId}/control`, {
+      const response = await apiClient.post(`/energy/meters/${meterId}/relays/${relayId}/control`, {
         action,
       });
+
+      // Si le backend retourne le relais mis à jour, l'utiliser directement
+      if (response.data.relay) {
+        const updatedRelay = response.data.relay;
+        setRelays(prevRelays => 
+          prevRelays.map(relay => 
+            relay.id === relayId 
+              ? { ...relay, isEnabled: updatedRelay.isEnabled }
+              : relay
+          )
+        );
+        console.log('✅ Relais mis à jour depuis la réponse serveur:', updatedRelay.isEnabled);
+      }
 
       notify.success(`Relais ${action === 'enable' ? 'activé' : 'désactivé'} avec succès`, {
         title: '✅ Commande envoyée',
         duration: 3000,
       });
 
-      // Recharger les relais
-      loadMeterAndRelays();
+      // Recharger les relais pour synchroniser avec le serveur (avec un délai plus long)
+      setTimeout(() => {
+        loadMeterAndRelays();
+      }, 1000);
     } catch (error) {
       console.error('Erreur contrôle relais:', error);
+      
+      // Annuler la mise à jour optimiste en cas d'erreur
+      setRelays(prevRelays => 
+        prevRelays.map(relay => 
+          relay.id === relayId 
+            ? { ...relay, isEnabled: !newEnabledState }
+            : relay
+        )
+      );
+
       notify.error(error.response?.data?.error || 'Erreur lors du contrôle du relais', {
         title: 'Échec',
       });
@@ -84,9 +119,9 @@ function SmartPanel({ homeId, userRole = 'ADMIN', permissions = null }) {
       case 'LIGHTS_PLUGS':
         return 'Éclairage et Prises';
       case 'POWER':
-        return 'Puissance';
+        return 'Puissance (Climatiseurs, Chauffe-eau)';
       case 'ESSENTIAL':
-        return 'Essentiel';
+        return 'Essentiel (Réfrigérateur)';
       default:
         return circuitType;
     }
@@ -180,74 +215,45 @@ function SmartPanel({ homeId, userRole = 'ADMIN', permissions = null }) {
             return (
               <div
                 key={relay.id}
-                className={`p-5 bg-gradient-to-br ${getCircuitColor(relay.circuitType)} rounded-xl border-2 ${
-                  isEnabled ? 'border-success-300 dark:border-success-700' : 'border-gray-300 dark:border-gray-600'
-                } hover:shadow-xl transition-all duration-300 animate-slide-up`}
+                className={`p-5 bg-white dark:bg-gray-800 rounded-xl border ${
+                  isEnabled ? 'border-success-300 dark:border-success-700 shadow-md' : 'border-gray-200 dark:border-gray-700'
+                } hover:shadow-lg transition-all duration-300 animate-slide-up`}
                 style={{ animationDelay: `${index * 0.1}s` }}
               >
                 {/* En-tête du relais */}
                 <div className="flex items-start justify-between mb-4">
-                  <div className="flex items-center space-x-3">
-                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${
-                      isEnabled ? 'bg-white/50 dark:bg-gray-800/50' : 'bg-gray-200/50 dark:bg-gray-700/50'
-                    }`}>
-                      <Icon className={`w-6 h-6 ${
-                        isEnabled ? 'text-primary-600 dark:text-primary-400' : 'text-gray-400'
-                      }`} />
-                    </div>
-                    <div>
-                      <h4 className="font-bold text-gray-900 dark:text-gray-100">
-                        Relais {relay.relayNumber}
-                      </h4>
-                      <p className="text-xs text-gray-600 dark:text-gray-400">
-                        {getCircuitLabel(relay.circuitType)}
-                      </p>
-                    </div>
+                  <div className="flex items-center space-x-2">
+                    <Settings className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                    <h4 className="font-semibold text-gray-900 dark:text-gray-100">
+                      Relais
+                    </h4>
                   </div>
-                  {isEnabled ? (
-                    <CheckCircle className="w-5 h-5 text-success-500" />
-                  ) : (
-                    <AlertCircle className="w-5 h-5 text-gray-400" />
-                  )}
+                  <Info className="w-4 h-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 cursor-help" />
                 </div>
 
-                {/* Label personnalisé */}
-                {relay.label && (
-                  <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
-                    {relay.label}
-                  </p>
-                )}
+                {/* Label du circuit */}
+                <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-4">
+                  {relay.label || getCircuitLabel(relay.circuitType)}
+                </p>
 
                 {/* Statistiques */}
-                <div className="space-y-2 mb-4">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-gray-600 dark:text-gray-400">Puissance actuelle</span>
-                    <span className="font-bold text-gray-900 dark:text-gray-100">
+                <div className="space-y-3 mb-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-gray-600 dark:text-gray-400">Puissance actuelle</span>
+                    <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
                       {relay.currentPower.toFixed(0)} W
                     </span>
                   </div>
                   {relay.maxPower && (
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-gray-600 dark:text-gray-400">Maximum</span>
-                      <span className="font-bold text-gray-900 dark:text-gray-100">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-gray-600 dark:text-gray-400">Maximum</span>
+                      <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
                         {relay.maxPower.toFixed(0)} W
                       </span>
                     </div>
                   )}
                   
-                  {/* Barre de progression */}
-                  {relay.maxPower > 0 && (
-                    <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 mt-2">
-                      <div
-                        className={`h-2 rounded-full transition-all duration-300 ${
-                          usagePercent > 80 ? 'bg-red-500' : usagePercent > 50 ? 'bg-yellow-500' : 'bg-success-500'
-                        }`}
-                        style={{ width: `${usagePercent}%` }}
-                      />
-                    </div>
-                  )}
-
-                  <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 pt-2 border-t border-gray-200 dark:border-gray-700">
                     <span>{relay.deviceCount || 0} appareil(s)</span>
                     <span>{usagePercent.toFixed(0)}% utilisé</span>
                   </div>
@@ -256,7 +262,7 @@ function SmartPanel({ homeId, userRole = 'ADMIN', permissions = null }) {
                 {/* Bouton de contrôle */}
                 <button
                   onClick={() => handleRelayControl(relay.id, isEnabled ? 'disable' : 'enable')}
-                  disabled={!isActive}
+                  disabled={!isActive || (relay.circuitType === 'ESSENTIAL' && userRole !== 'ADMIN_ETAT')}
                   className={`w-full py-2.5 px-4 rounded-lg font-semibold text-sm transition-all duration-200 ${
                     isEnabled
                       ? 'bg-red-500 hover:bg-red-600 text-white'
@@ -271,9 +277,10 @@ function SmartPanel({ homeId, userRole = 'ADMIN', permissions = null }) {
         </div>
 
         {/* Note explicative */}
-        <div className="mt-6 p-4 bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-500 rounded-r-xl">
+        <div className="mt-6 p-4 bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-500 rounded-r-xl flex items-start space-x-3">
+          <Lightbulb className="w-5 h-5 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" />
           <p className="text-sm text-blue-800 dark:text-blue-300">
-            <strong>💡 Smart Panel :</strong> Les relais internes du boîtier IoT permettent de gérer sélectivement 
+            <strong>Smart Panel :</strong> Les relais internes du boîtier IoT permettent de gérer sélectivement 
             les circuits électriques. En cas de délestage, seul le relais "Puissance" peut être coupé, 
             préservant l'éclairage et les appareils essentiels.
           </p>

@@ -92,6 +92,9 @@ export async function executeSQL(sql, params = []) {
       
       if (param === null || param === undefined) {
         safeSql = safeSql.replace(placeholder, 'NULL');
+      } else if (typeof param === 'boolean') {
+        // PostgreSQL attend true/false sans guillemets
+        safeSql = safeSql.replace(placeholder, param ? 'true' : 'false');
       } else if (typeof param === 'string') {
         // Échapper les guillemets simples et doubles
         const escaped = param.replace(/'/g, "''").replace(/"/g, '\\"');
@@ -108,8 +111,8 @@ export async function executeSQL(sql, params = []) {
     const { stdout } = await execAsync(command);
     
     // Extraire le nombre de lignes affectées
-    const match = stdout.match(/INSERT|UPDATE|DELETE|(\d+)/);
-    const rowCount = match ? parseInt(match[1] || '0') : 0;
+    const match = stdout.match(/UPDATE (\d+)|INSERT|DELETE|(\d+)/);
+    const rowCount = match ? parseInt(match[1] || match[2] || '0') : 0;
     
     return { rowCount, rows: [] };
   } catch (error) {

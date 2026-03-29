@@ -20,4 +20,5 @@ export { personnelService } from './personnelService.js';
 export { tasksService } from './tasksService.js';
 export { sigeIdService } from './sigeIdService.js';
 export { taskReportsService } from './taskReportsService.js';
+export { billsService } from './billsService.js';
 export { default as apiClient } from './api.js';
