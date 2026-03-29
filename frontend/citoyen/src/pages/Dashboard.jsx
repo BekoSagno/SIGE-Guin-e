@@ -14,12 +14,23 @@ import DeviceScheduler from '../components/DeviceScheduler';
 import PredictiveMaintenance from '../components/PredictiveMaintenance';
 import IncidentReport from '../components/IncidentReport';
 import DashboardSidebar from '../components/DashboardSidebar';
+import PillarActionsModal from '../components/PillarActionsModal';
 import EDGMessages from '../components/EDGMessages';
+import { getPillarById, getSectionMeta } from '../config/citizenNav.jsx';
 import AddHomeModal from '../components/AddHomeModal';
 import ThemeToggle from '../components/ThemeToggle';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { usePermissions } from '../hooks/usePermissions';
 import { useNotification } from '../components/Notification';
+
+/** Libellés citoyens pour le type d’alimentation du foyer */
+function formatHomeEnergyLabel(type) {
+  const t = String(type || '').toUpperCase();
+  if (t === 'HYBRIDE') return 'EDG + solaire';
+  if (t === 'SOLAIRE') return 'Solaire';
+  if (t === 'EDG') return 'Réseau EDG';
+  return type || '—';
+}
 
 function Dashboard() {
   const notify = useNotification();
@@ -32,7 +43,10 @@ function Dashboard() {
   const [activeSection, setActiveSection] = useState('overview');
   const [showAddHomeModal, setShowAddHomeModal] = useState(false);
   const [addingHome, setAddingHome] = useState(false);
+  const [pillarModalId, setPillarModalId] = useState(null);
   const navigate = useNavigate();
+
+  const sectionMeta = getSectionMeta(activeSection);
 
   // Connexion WebSocket pour les alertes de délestage (désactivé temporairement pour debug)
   // const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:5000/ws';
@@ -119,8 +133,8 @@ function Dashboard() {
   // Afficher un badge de rôle
   const getRoleBadge = (role) => {
     const badges = {
-      ADMIN: { label: 'Administrateur', color: 'bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300', icon: Shield },
-      MEMBER: { label: 'Membre', color: 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300', icon: Activity },
+      ADMIN: { label: 'Responsable du foyer', color: 'bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300', icon: Shield },
+      MEMBER: { label: 'Membre du foyer', color: 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300', icon: Activity },
       CHILD: { label: 'Enfant', color: 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300', icon: Activity },
     };
     return badges[role] || badges.MEMBER;
@@ -168,7 +182,7 @@ function Dashboard() {
                 <h1 className="text-lg sm:text-2xl lg:text-3xl font-extrabold bg-gradient-to-r from-primary-600 to-primary-500 bg-clip-text text-transparent">
                   SIGE-Guinée
                 </h1>
-                <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 hidden sm:block">Espace Citoyen</p>
+                <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-400 hidden sm:block">Électricité à la maison</p>
               </div>
             </div>
 
@@ -188,10 +202,10 @@ function Dashboard() {
               <button
                 onClick={() => setShowAddHomeModal(true)}
                 className="flex items-center space-x-1 sm:space-x-2 px-2 sm:px-3 lg:px-4 py-2 bg-primary-500 hover:bg-primary-600 text-white rounded-lg transition-all duration-200 hover:scale-105 shadow-md hover:shadow-lg"
-                title="Ajouter un foyer"
+                title="Ajouter un autre foyer"
               >
                 <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
-                <span className="hidden sm:inline font-medium text-sm">Ajouter Foyer</span>
+                <span className="hidden sm:inline font-medium text-sm">Ajouter un foyer</span>
               </button>
               
               {/* Theme toggle - toujours visible */}
@@ -230,14 +244,27 @@ function Dashboard() {
       <div className="flex gap-4 lg:gap-6 max-w-[1920px] mx-auto px-3 sm:px-4 lg:px-8 py-4 sm:py-6 lg:py-8">
         {/* Sidebar de navigation - gérée en interne pour être responsive */}
         {selectedHome && homes.length > 0 && (
-          <DashboardSidebar 
-            activeSection={activeSection} 
-            onSectionChange={setActiveSection} 
-          />
+          <DashboardSidebar activeSection={activeSection} onOpenPillarMenu={(id) => setPillarModalId(id)} />
         )}
 
         {/* Contenu principal - padding bottom pour menu mobile/tablette */}
         <main className="flex-1 min-w-0 pb-20 md:pb-20 lg:pb-0">
+        {selectedHome && homes.length > 0 && sectionMeta && (
+          <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-gray-200 bg-white/90 px-3 py-2.5 text-sm shadow-sm dark:border-gray-600 dark:bg-gray-800/90">
+            <span className="text-gray-600 dark:text-gray-400">
+              Thème : <strong className="text-gray-900 dark:text-gray-100">{sectionMeta.pillar.title}</strong>
+            </span>
+            <span className="hidden text-gray-300 sm:inline dark:text-gray-600">|</span>
+            <span className="text-gray-800 dark:text-gray-200">{sectionMeta.item.label}</span>
+            <button
+              type="button"
+              onClick={() => setPillarModalId(sectionMeta.pillar.id)}
+              className="ml-auto rounded-lg bg-primary-50 px-3 py-1.5 text-xs font-bold text-primary-700 transition hover:bg-primary-100 dark:bg-primary-900/40 dark:text-primary-200 dark:hover:bg-primary-900/60"
+            >
+              Autres actions du thème
+            </button>
+          </div>
+        )}
         {/* Alerte de délestage */}
         {loadSheddingAlert && (
           <div className={`mb-6 card border-l-4 ${
@@ -259,8 +286,8 @@ function Dashboard() {
                       : 'text-green-900'
                   }`}>
                     {loadSheddingAlert.type === 'SHED_HEAVY_LOADS' 
-                      ? 'Mode Économie Réseau Activé' 
-                      : 'Restauration du Réseau'}
+                      ? 'Le réseau demande de réduire la consommation' 
+                      : 'Retour à la normale sur le réseau'}
                   </h3>
                   <p className={`text-sm ${
                     loadSheddingAlert.type === 'SHED_HEAVY_LOADS' 
@@ -292,12 +319,9 @@ function Dashboard() {
               <Zap className="w-12 h-12 text-primary-600 dark:text-primary-400" />
             </div>
             <h3 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-3">Aucun foyer configuré</h3>
-            <p className="text-gray-600 dark:text-gray-400 mb-8 text-lg">Ajoutez votre premier foyer pour commencer à suivre votre consommation d'énergie</p>
+            <p className="text-gray-600 dark:text-gray-400 mb-8 text-lg">Ajoutez votre logement pour voir votre crédit, votre consommation et piloter votre boîtier SIGE.</p>
             <button 
-              onClick={() => {
-                console.log('Bouton cliqué, ouverture modal');
-                setShowAddHomeModal(true);
-              }}
+              onClick={() => setShowAddHomeModal(true)}
               className="btn-primary mx-auto flex items-center gap-2"
             >
               <Zap className="w-5 h-5" />
@@ -331,7 +355,7 @@ function Dashboard() {
                       </span>
                       <span>•</span>
                       <span className="px-3 py-1 bg-white/20 backdrop-blur-sm rounded-lg font-medium">
-                        {selectedHome.type}
+                        {formatHomeEnergyLabel(selectedHome.type)}
                       </span>
                     </div>
                   </div>
@@ -348,7 +372,7 @@ function Dashboard() {
               {selectedHome.type !== 'SOLAIRE' && permissions.canViewFinancials ? (
                 <div className="stat-card group animate-slide-up" style={{ animationDelay: '0.1s' }}>
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-base sm:text-lg font-bold text-gray-700 dark:text-gray-300">Crédit EDG</h3>
+                    <h3 className="text-base sm:text-lg font-bold text-gray-700 dark:text-gray-300">Mon crédit</h3>
                     <div className="w-12 h-12 bg-primary-500/20 dark:bg-primary-500/30 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform duration-200">
                       <Zap className="w-6 h-6 text-primary-600 dark:text-primary-400" />
                     </div>
@@ -356,37 +380,37 @@ function Dashboard() {
                   <p className="text-3xl sm:text-4xl font-extrabold bg-gradient-to-r from-primary-600 to-primary-500 bg-clip-text text-transparent mb-1">
                     {selectedHome.financials?.balance?.toLocaleString('fr-FR') || '0'}
                   </p>
-                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400">GNF disponibles</p>
+                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400">GNF sur votre compteur (prépayé)</p>
                 </div>
               ) : selectedHome.type !== 'SOLAIRE' ? (
                 <div className="card opacity-60 cursor-not-allowed">
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-base sm:text-lg font-semibold text-gray-500 dark:text-gray-400">Crédit EDG</h3>
+                    <h3 className="text-base sm:text-lg font-semibold text-gray-500 dark:text-gray-400">Mon crédit</h3>
                     <Lock className="w-6 h-6 text-gray-400" />
                   </div>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">Accès restreint</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Réservé au responsable du foyer</p>
                 </div>
               ) : null}
 
               {selectedHome.type !== 'EDG' && (
                 <div className="success-card group animate-slide-up" style={{ animationDelay: '0.2s' }}>
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-base sm:text-lg font-bold text-gray-700 dark:text-gray-300">Batterie Solaire</h3>
+                    <h3 className="text-base sm:text-lg font-bold text-gray-700 dark:text-gray-300">Solaire</h3>
                     <div className="w-12 h-12 bg-success-500/20 dark:bg-success-500/30 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform duration-200">
                       <Battery className="w-6 h-6 text-success-600 dark:text-success-400" />
                     </div>
                   </div>
                   <p className="text-3xl sm:text-4xl font-extrabold bg-gradient-to-r from-success-600 to-success-500 bg-clip-text text-transparent mb-1">
-                    - %
+                    —
                   </p>
-                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400">État de charge</p>
+                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Charge batterie (donnée du boîtier)</p>
                 </div>
               )}
 
               {energyData ? (
                 <div className="accent-card group animate-slide-up" style={{ animationDelay: '0.3s' }}>
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-base sm:text-lg font-bold text-gray-700 dark:text-gray-300">Consommation</h3>
+                    <h3 className="text-base sm:text-lg font-bold text-gray-700 dark:text-gray-300">Puissance en ce moment</h3>
                     <div className="w-12 h-12 bg-accent-500/20 dark:bg-accent-500/30 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform duration-200">
                       <Activity className="w-6 h-6 text-accent-600 dark:text-accent-400" />
                     </div>
@@ -394,12 +418,12 @@ function Dashboard() {
                   <p className="text-3xl sm:text-4xl font-extrabold bg-gradient-to-r from-accent-600 to-accent-500 bg-clip-text text-transparent mb-1">
                     {energyData.statistics?.averagePower?.toFixed(0) || '0'} W
                   </p>
-                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Moyenne actuelle</p>
+                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Ce que le foyer utilise tout de suite</p>
                 </div>
               ) : (
                 <div className="accent-card group animate-slide-up" style={{ animationDelay: '0.3s' }}>
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-base sm:text-lg font-bold text-gray-700 dark:text-gray-300">Consommation</h3>
+                    <h3 className="text-base sm:text-lg font-bold text-gray-700 dark:text-gray-300">Puissance en ce moment</h3>
                     <div className="w-12 h-12 bg-accent-500/20 dark:bg-accent-500/30 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform duration-200">
                       <Activity className="w-6 h-6 text-accent-600 dark:text-accent-400" />
                     </div>
@@ -407,7 +431,7 @@ function Dashboard() {
                   <p className="text-3xl sm:text-4xl font-extrabold bg-gradient-to-r from-accent-600 to-accent-500 bg-clip-text text-transparent mb-1">
                     0 W
                   </p>
-                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400">En attente de données</p>
+                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Branchez le boîtier ou attendez la prochaine mesure</p>
                 </div>
               )}
                 </div>
@@ -486,7 +510,7 @@ function Dashboard() {
                 <div className="text-center py-8">
                   <Lock className="w-12 h-12 text-gray-400 mx-auto mb-4" />
                   <p className="text-gray-600 dark:text-gray-400">
-                    Vue limitée - Contactez un administrateur pour plus d'informations
+                    Demandez au responsable du foyer pour voir ce détail.
                   </p>
                 </div>
               </div>
@@ -510,7 +534,7 @@ function Dashboard() {
                 <div className="text-center py-8">
                   <Lock className="w-12 h-12 text-gray-400 mx-auto mb-4" />
                   <p className="text-gray-600 dark:text-gray-400">
-                    Seuls les administrateurs peuvent configurer les kits IoT
+                    Seul le responsable du foyer peut brancher ou configurer le boîtier SIGE.
                   </p>
                 </div>
               </div>
@@ -521,7 +545,7 @@ function Dashboard() {
                 <div className="text-center py-8">
                   <Lock className="w-12 h-12 text-gray-400 mx-auto mb-4" />
                   <p className="text-gray-600 dark:text-gray-400">
-                    Vue limitée - Contactez un administrateur pour plus d'informations
+                    Demandez au responsable du foyer pour voir ce détail.
                   </p>
                 </div>
               </div>
@@ -537,6 +561,17 @@ function Dashboard() {
         )}
         </main>
       </div>
+
+      <PillarActionsModal
+        isOpen={Boolean(pillarModalId)}
+        pillar={getPillarById(pillarModalId)}
+        activeSectionId={activeSection}
+        onClose={() => setPillarModalId(null)}
+        onSelectSection={(sectionId) => {
+          setActiveSection(sectionId);
+          setPillarModalId(null);
+        }}
+      />
 
       {/* Modal Ajouter un Foyer */}
       <AddHomeModal
